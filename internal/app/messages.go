@@ -125,27 +125,25 @@ func operationCmd(ctx context.Context, client podman.Client, action domain.Actio
 }
 
 func startLogStreamCmd(ctx context.Context, client podman.Client, id string, options podman.LogOptions, generation uint64) tea.Cmd {
-	return func() tea.Msg {
-		channel := make(chan logStreamEvent, 1)
-		go func() {
-			err := client.StreamLogs(ctx, id, options, func(line domain.LogLine) {
-				select {
-				case channel <- logStreamEvent{Generation: generation, Line: &line}:
-				case <-ctx.Done():
-				}
-			})
+	channel := make(chan logStreamEvent, 1)
+	go func() {
+		err := client.StreamLogs(ctx, id, options, func(line domain.LogLine) {
 			select {
-			case channel <- logStreamEvent{Generation: generation, Done: true, Err: err}:
+			case channel <- logStreamEvent{Generation: generation, Line: &line}:
 			case <-ctx.Done():
-				select {
-				case channel <- logStreamEvent{Generation: generation, Done: true, Err: ctx.Err()}:
-				default:
-				}
 			}
-			close(channel)
-		}()
-		return waitLogStream(channel, generation)
-	}
+		})
+		select {
+		case channel <- logStreamEvent{Generation: generation, Done: true, Err: err}:
+		case <-ctx.Done():
+			select {
+			case channel <- logStreamEvent{Generation: generation, Done: true, Err: ctx.Err()}:
+			default:
+			}
+		}
+		close(channel)
+	}()
+	return waitLogStream(channel, generation)
 }
 
 func waitLogStream(channel <-chan logStreamEvent, generation uint64) tea.Cmd {
@@ -161,27 +159,25 @@ func waitLogStream(channel <-chan logStreamEvent, generation uint64) tea.Cmd {
 }
 
 func startStatsStreamCmd(ctx context.Context, client podman.Client, id string, generation uint64) tea.Cmd {
-	return func() tea.Msg {
-		channel := make(chan statsStreamEvent, 1)
-		go func() {
-			err := client.StreamStats(ctx, id, func(sample domain.ContainerStats) {
-				select {
-				case channel <- statsStreamEvent{Generation: generation, Sample: &sample}:
-				case <-ctx.Done():
-				}
-			})
+	channel := make(chan statsStreamEvent, 1)
+	go func() {
+		err := client.StreamStats(ctx, id, func(sample domain.ContainerStats) {
 			select {
-			case channel <- statsStreamEvent{Generation: generation, Done: true, Err: err}:
+			case channel <- statsStreamEvent{Generation: generation, Sample: &sample}:
 			case <-ctx.Done():
-				select {
-				case channel <- statsStreamEvent{Generation: generation, Done: true, Err: ctx.Err()}:
-				default:
-				}
 			}
-			close(channel)
-		}()
-		return waitStatsStream(channel, generation)
-	}
+		})
+		select {
+		case channel <- statsStreamEvent{Generation: generation, Done: true, Err: err}:
+		case <-ctx.Done():
+			select {
+			case channel <- statsStreamEvent{Generation: generation, Done: true, Err: ctx.Err()}:
+			default:
+			}
+		}
+		close(channel)
+	}()
+	return waitStatsStream(channel, generation)
 }
 
 func waitStatsStream(channel <-chan statsStreamEvent, generation uint64) tea.Cmd {

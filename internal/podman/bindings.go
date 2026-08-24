@@ -172,8 +172,17 @@ func (c *bindingsClient) StreamLogs(ctx context.Context, id string, options LogO
 	stderrCh := make(chan string)
 	errCh := make(chan error, 1)
 	go func() { errCh <- containers.Logs(opCtx, id, logOptions, stdoutCh, stderrCh) }()
-	streamDone := false
-	for stdoutCh != nil || stderrCh != nil || !streamDone {
+	return consumeLogStream(ctx, id, stdoutCh, stderrCh, errCh, emit)
+}
+
+func consumeLogStream(
+	ctx context.Context,
+	id string,
+	stdoutCh, stderrCh <-chan string,
+	errCh <-chan error,
+	emit func(domain.LogLine),
+) error {
+	for {
 		select {
 		case line, ok := <-stdoutCh:
 			if !ok {
@@ -188,15 +197,17 @@ func (c *bindingsClient) StreamLogs(ctx context.Context, id string, options LogO
 			}
 			emit(domain.LogLine{Text: line, Stream: "stderr", ObservedAt: time.Now()})
 		case err := <-errCh:
-			streamDone = true
 			if err != nil {
 				return Wrap(domain.ActionLogs, id, err)
 			}
+			// containers.Logs writes every line synchronously before returning.
+			// Real Podman connections do not necessarily close the caller-owned
+			// channels, so successful completion is the stream terminator.
+			return nil
 		case <-ctx.Done():
 			return Wrap(domain.ActionLogs, id, ctx.Err())
 		}
 	}
-	return nil
 }
 
 func (c *bindingsClient) StreamStats(ctx context.Context, id string, emit func(domain.ContainerStats)) error {

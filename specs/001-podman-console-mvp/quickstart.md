@@ -41,6 +41,19 @@ ssh://user@example.test/run/user/1000/podman/podman.sock
 The managed user must have a Podman service available. For a rootless Linux service, the
 official Podman tutorial documents enabling `podman.socket` and configuring SSH access.
 
+The opt-in integration suite can exercise the complete supported workflow against a dedicated,
+disposable container:
+
+```sh
+PODMAN_CONSOLE_URI='ssh://user@host/run/user/1000/podman/podman.sock' \
+PODMAN_CONSOLE_IDENTITY='/path/to/identity' \
+PODMAN_CONSOLE_TEST_CONTAINER='podman-console-live-test' \
+go test -tags=containers_image_openpgp,remote,integration -v ./tests/integration
+```
+
+`PODMAN_CONSOLE_TEST_CONTAINER` must identify a fixture created only for this test. The workflow
+inspects it, reads logs and stats, restarts, stops, starts, stops, then removes that exact ID.
+
 ## Acceptance scenarios
 
 1. Start with a fake or live host containing one running and one stopped container. Select the
@@ -62,7 +75,13 @@ official Podman tutorial documents enabling `podman.socket` and configuring SSH 
 - `go test -tags=containers_image_openpgp,remote ./...` passes;
 - `go vet -tags=containers_image_openpgp,remote ./...` passes;
 - tagged builds pass for Darwin/arm64, Linux/amd64 and Windows/amd64;
-- the opt-in live-host test is compile-checked and skipped when `PODMAN_CONSOLE_URI` is absent;
+- the opt-in test skips cleanly when `PODMAN_CONSOLE_URI` is absent;
 - adapter lifecycle responses and stale-target errors are covered by an `httptest` service;
-- live Podman validation remains the only external check because no host was provided in this
-  session.
+- Rocky Linux 9.8/arm64 with rootless Podman 5.8.2 was validated through both a local Unix socket
+  and an SSH connection from macOS;
+- the live workflow passes for inventory, details, ordered logs, stats, restart, stop, start and
+  exact-ID removal, and the TUI was exercised interactively for inventory, details, logs, stats
+  and confirmation cancellation;
+- live validation exposed and closed two stream defects: non-following logs now terminate when
+  the Podman call completes, and Bubble Tea receives stream events directly instead of nested
+  commands.

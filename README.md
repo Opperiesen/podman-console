@@ -18,6 +18,11 @@ sur macOS, Linux et Windows.
 Le test par défaut n’exige aucun hôte Podman. Les profils sont stockés dans le répertoire de
 configuration utilisateur, sans mot de passe ni clé privée.
 
+La validation live est opt-in. Avec `PODMAN_CONSOLE_URI` et, pour SSH,
+`PODMAN_CONSOLE_IDENTITY`, l’inventaire est testé sans mutation. En ajoutant
+`PODMAN_CONSOLE_TEST_CONTAINER`, la suite exerce le workflow complet sur ce conteneur jetable et
+le supprime à la fin ; voir le [quickstart](specs/001-podman-console-mvp/quickstart.md).
+
 ## Périmètre MVP
 
 Une seule cible est active à la fois. Les opérations en masse, la construction d’images, les

@@ -152,3 +152,26 @@ func TestBindingsLifecycleMapsSuccessAndStaleErrors(t *testing.T) {
 		t.Fatalf("Stop() error = %#v, want stale target operation error", err)
 	}
 }
+
+func TestConsumeLogStreamReturnsWhenProducerCompletesWithoutClosingChannels(t *testing.T) {
+	stdout := make(chan string)
+	stderr := make(chan string)
+	done := make(chan error, 1)
+	go func() {
+		stdout <- "first line"
+		done <- nil
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var lines []domain.LogLine
+	err := consumeLogStream(ctx, "container-id", stdout, stderr, done, func(line domain.LogLine) {
+		lines = append(lines, line)
+	})
+	if err != nil {
+		t.Fatalf("consume log stream: %v", err)
+	}
+	if len(lines) != 1 || lines[0].Text != "first line" || lines[0].Stream != "stdout" {
+		t.Fatalf("unexpected log lines: %#v", lines)
+	}
+}
