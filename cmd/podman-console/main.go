@@ -9,11 +9,12 @@ import (
 	"github.com/Opperiesen/podman-console/internal/podman"
 )
 
-const version = "0.1.0"
+// version is a variable so release builds can override it with -ldflags -X.
+var version = "0.1.0"
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Println(version)
+		fmt.Printf("podman-console %s\n", version)
 		return
 	}
 	store, err := config.NewStore("podman-console")

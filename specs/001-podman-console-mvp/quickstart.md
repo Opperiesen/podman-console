@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.25.9 or newer
+- Go 1.26.7 or newer
 - A terminal with UTF-8 support
 - For live validation only: a reachable Podman service and a connection URI
 
@@ -84,4 +84,10 @@ inspects it, reads logs and stats, restarts, stops, starts, stops, then removes 
   and confirmation cancellation;
 - live validation exposed and closed two stream defects: non-following logs now terminate when
   the Podman call completes, and Bubble Tea receives stream events directly instead of nested
-  commands.
+  commands;
+- the release build dependency closure contains 122 modules: 60 Apache-2.0, 32 MIT,
+  20 BSD-3-Clause, 5 BSD-2-Clause, 3 MPL-2.0 and 2 Unlicense; no GPL or LGPL module is linked by
+  the pure-Go build, and the three MPL-2.0 components remain available from their upstream
+  source repositories;
+- `podman-console --version` reports `podman-console 0.1.0`, and CI verifies that release
+  metadata on every supported build matrix entry.

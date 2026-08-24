@@ -1,5 +1,8 @@
 # Podman Console
 
+[![CI](https://github.com/Opperiesen/podman-console/actions/workflows/ci.yml/badge.svg)](https://github.com/Opperiesen/podman-console/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
 Podman Console est une interface terminal indépendante pour administrer une cible Podman locale
 ou distante : inventaire, détails, cycle de vie, logs suivis et métriques CPU/mémoire.
 
@@ -28,3 +31,8 @@ le supprime à la fin ; voir le [quickstart](specs/001-podman-console-mvp/quicks
 Une seule cible est active à la fois. Les opérations en masse, la construction d’images, les
 registries, l’orchestration de pods et l’agrégation de plusieurs hôtes ne font pas partie de ce
 MVP.
+
+## Licence
+
+Podman Console est distribué sous licence [Apache-2.0](LICENSE). Tu peux l’utiliser, le modifier
+et le redistribuer, y compris dans un contexte commercial, selon les termes de cette licence.

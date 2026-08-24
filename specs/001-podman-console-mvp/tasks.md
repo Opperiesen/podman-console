@@ -136,7 +136,7 @@ streams and optional live Podman validation.
 - [x] T040 [P] Add user-facing project overview, screenshots or terminal recording guidance, build instructions, and scope boundaries in `README.md`
 - [x] T041 [P] Add opt-in live-host integration test harness and environment contract in `tests/integration/podman_test.go`
 - [x] T042 Run formatting, vet, unit tests, cross-platform builds, and quickstart acceptance checks; record any release blockers in `quickstart.md`
-- [ ] T043 Review dependency licenses and binary behavior, then prepare the first versioned release metadata in `LICENSE`, `.github/workflows/ci.yml`, and `cmd/podman-console/main.go`
+- [x] T043 Review dependency licenses and binary behavior, then prepare the first versioned release metadata in `LICENSE`, `.github/workflows/ci.yml`, and `cmd/podman-console/main.go`
 
 ---
 
