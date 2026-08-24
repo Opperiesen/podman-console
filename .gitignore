@@ -1,0 +1,11 @@
+/bin/
+/dist/
+/podman-console
+*.test
+*.out
+.DS_Store
+
+# Local configuration and editor state
+.idea/
+.vscode/
+podman-console.json

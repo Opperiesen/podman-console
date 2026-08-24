@@ -11,19 +11,20 @@
 From the repository root:
 
 ```sh
-go test ./...
-go vet ./...
-go build ./cmd/podman-console
+go test -tags=containers_image_openpgp,remote ./...
+go vet -tags=containers_image_openpgp,remote ./...
+go build -tags=containers_image_openpgp,remote ./cmd/podman-console
 ```
 
-The commands above must succeed without a live Podman host.
+The commands above must succeed without a live Podman host. The build tags select the pure-Go
+OpenPGP backend and Podman service mode, so a native `gpgme` installation is not required.
 
 ## Cross-platform build check
 
 ```sh
-GOOS=darwin GOARCH=arm64 go build -o dist/podman-console-darwin-arm64 ./cmd/podman-console
-GOOS=linux GOARCH=amd64 go build -o dist/podman-console-linux-amd64 ./cmd/podman-console
-GOOS=windows GOARCH=amd64 go build -o dist/podman-console-windows-amd64.exe ./cmd/podman-console
+GOOS=darwin GOARCH=arm64 go build -tags=containers_image_openpgp,remote -o dist/podman-console-darwin-arm64 ./cmd/podman-console
+GOOS=linux GOARCH=amd64 go build -tags=containers_image_openpgp,remote -o dist/podman-console-linux-amd64 ./cmd/podman-console
+GOOS=windows GOARCH=amd64 go build -tags=containers_image_openpgp,remote -o dist/podman-console-windows-amd64.exe ./cmd/podman-console
 ```
 
 The resulting artifacts are smoke-checked on their target platform before a release.
@@ -55,3 +56,13 @@ official Podman tutorial documents enabling `podman.socket` and configuring SSH 
 6. Open metrics. Verify CPU/memory samples show an observation time and that a disconnected
    stream does not erase the last sample.
 7. Run the complete default test suite on a machine without Podman installed.
+
+## Validation record — 2026-08-24
+
+- `go test -tags=containers_image_openpgp,remote ./...` passes;
+- `go vet -tags=containers_image_openpgp,remote ./...` passes;
+- tagged builds pass for Darwin/arm64, Linux/amd64 and Windows/amd64;
+- the opt-in live-host test is compile-checked and skipped when `PODMAN_CONSOLE_URI` is absent;
+- adapter lifecycle responses and stale-target errors are covered by an `httptest` service;
+- live Podman validation remains the only external check because no host was provided in this
+  session.

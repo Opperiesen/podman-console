@@ -15,11 +15,11 @@ independently after the foundational layer.
 
 **Purpose**: Establish the Go module, executable entry point, project guidance, and CI skeleton.
 
-- [ ] T001 Initialize the Go module and pinned direct dependencies in `go.mod` and `go.sum`
-- [ ] T002 [P] Create the executable entry point and version metadata in `cmd/podman-console/main.go`
-- [ ] T003 [P] Add repository ignores for Go artifacts and local configuration in `.gitignore`
-- [ ] T004 [P] Document project commands and validation gates in `AGENTS.md`
-- [ ] T005 [P] Add baseline cross-platform formatting, test, vet, and build workflow in `.github/workflows/ci.yml`
+- [x] T001 Initialize the Go module and pinned direct dependencies in `go.mod` and `go.sum`
+- [x] T002 [P] Create the executable entry point and version metadata in `cmd/podman-console/main.go`
+- [x] T003 [P] Add repository ignores for Go artifacts and local configuration in `.gitignore`
+- [x] T004 [P] Document project commands and validation gates in `AGENTS.md`
+- [x] T005 [P] Add baseline cross-platform formatting, test, vet, and build workflow in `.github/workflows/ci.yml`
 
 ---
 
@@ -30,15 +30,15 @@ by every user story.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T006 [P] Define connection, container, stream, and operation domain values in `internal/domain/connection.go`, `internal/domain/container.go`, and `internal/domain/operation.go`
-- [ ] T007 [P] Define the `PodmanClient` connection, inventory, lifecycle, log, and stats port in `internal/podman/client.go`
-- [ ] T008 [P] Implement JSON connection-profile validation and platform config-path resolution in `internal/config/model.go` and `internal/config/store.go`
-- [ ] T009 Implement the Podman bindings adapter and typed error classification in `internal/podman/bindings.go` and `internal/podman/errors.go`
-- [ ] T010 [P] Add deterministic fake-client fixtures for inventories, details, mutations, logs, metrics, and failures in `tests/fixtures/fake_client.go`
-- [ ] T011 [P] Define application messages, screen state, selection state, and cancellation state in `internal/app/messages.go` and `internal/app/model.go`
-- [ ] T012 [P] Define shared key bindings, styles, responsive layout helpers, and common components in `internal/ui/keys.go`, `internal/ui/styles.go`, `internal/ui/layout.go`, and `internal/ui/components.go`
-- [ ] T013 Add constructor and process wiring for config store, Podman client factory, and Bubble Tea program in `internal/app/app.go` and `cmd/podman-console/main.go`
-- [ ] T014 [P] Add unit tests for domain validation, profile persistence, error classification, and fake-client behavior in `internal/domain/*_test.go`, `internal/config/*_test.go`, and `internal/podman/*_test.go`
+- [x] T006 [P] Define connection, container, stream, and operation domain values in `internal/domain/connection.go`, `internal/domain/container.go`, and `internal/domain/operation.go`
+- [x] T007 [P] Define the `PodmanClient` connection, inventory, lifecycle, log, and stats port in `internal/podman/client.go`
+- [x] T008 [P] Implement JSON connection-profile validation and platform config-path resolution in `internal/config/model.go` and `internal/config/store.go`
+- [x] T009 Implement the Podman bindings adapter and typed error classification in `internal/podman/bindings.go` and `internal/podman/errors.go`
+- [x] T010 [P] Add deterministic fake-client fixtures for inventories, details, mutations, logs, metrics, and failures in `tests/fixtures/fake_client.go`
+- [x] T011 [P] Define application messages, screen state, selection state, and cancellation state in `internal/app/messages.go` and `internal/app/model.go`
+- [x] T012 [P] Define shared key bindings, styles, responsive layout helpers, and common components in `internal/ui/keys.go`, `internal/ui/styles.go`, `internal/ui/layout.go`, and `internal/ui/components.go`
+- [x] T013 Add constructor and process wiring for config store, Podman client factory, and Bubble Tea program in `internal/app/app.go` and `cmd/podman-console/main.go`
+- [x] T014 [P] Add unit tests for domain validation, profile persistence, error classification, and fake-client behavior in `internal/domain/*_test.go`, `internal/config/*_test.go`, and `internal/podman/*_test.go`
 
 **Checkpoint**: The project builds, the app model can run without a live host, and all transport
 calls are behind a deterministic contract.
@@ -56,17 +56,17 @@ states without a live Podman host.
 
 ### Tests for User Story 1
 
-- [ ] T015 [P] [US1] Add model tests for profile selection, loading, empty inventory, filtering, and refresh messages in `internal/app/model_test.go`
-- [ ] T016 [P] [US1] Add rendering tests for target header, container rows, progress, empty state, and connection errors in `internal/ui/layout_test.go`
+- [x] T015 [P] [US1] Add model tests for profile selection, loading, empty inventory, filtering, and refresh messages in `internal/app/model_test.go`
+- [x] T016 [P] [US1] Add rendering tests for target header, container rows, progress, empty state, and connection errors in `internal/ui/layout_test.go`
 
 ### Implementation for User Story 1
 
-- [ ] T017 [US1] Implement profile loading, selection, and connection-switch commands in `internal/app/app.go` and `internal/app/model.go`
-- [ ] T018 [US1] Implement the connection selector view with active-target indication and profile actions in `internal/ui/components.go` and `internal/app/model.go`
-- [ ] T019 [US1] Implement asynchronous inventory loading, refresh, filtering, and stale-response protection in `internal/app/messages.go` and `internal/app/model.go`
-- [ ] T020 [US1] Render the responsive inventory screen with target status, columns, key hints, loading state, empty state, and typed errors in `internal/ui/layout.go` and `internal/ui/styles.go`
-- [ ] T021 [US1] Add the first-run profile configuration flow and save/remove profile behavior in `internal/config/store.go` and `internal/app/model.go`
-- [ ] T022 [US1] Update the executable startup path and sample configuration documentation for the inventory workflow in `cmd/podman-console/main.go` and `docs/connections.md`
+- [x] T017 [US1] Implement profile loading, selection, and connection-switch commands in `internal/app/app.go` and `internal/app/model.go`
+- [x] T018 [US1] Implement the connection selector view with active-target indication and profile actions in `internal/ui/components.go` and `internal/app/model.go`
+- [x] T019 [US1] Implement asynchronous inventory loading, refresh, filtering, and stale-response protection in `internal/app/messages.go` and `internal/app/model.go`
+- [x] T020 [US1] Render the responsive inventory screen with target status, columns, key hints, loading state, empty state, and typed errors in `internal/ui/layout.go` and `internal/ui/styles.go`
+- [x] T021 [US1] Add the first-run profile configuration flow and save/remove profile behavior in `internal/config/store.go` and `internal/app/model.go`
+- [x] T022 [US1] Update the executable startup path and sample configuration documentation for the inventory workflow in `cmd/podman-console/main.go` and `docs/connections.md`
 
 **Checkpoint**: User Story 1 is independently usable with a fake host and can be manually
 validated against a reachable Podman service.
@@ -84,17 +84,17 @@ messages.
 
 ### Tests for User Story 2
 
-- [ ] T023 [P] [US2] Add detail-view model tests for metadata, empty fields, stale selections, and target changes in `internal/app/detail_test.go`
-- [ ] T024 [P] [US2] Add safety-dialog tests proving stop, restart, and remove require exact-target confirmation and cancellation sends no mutation in `internal/app/safety_test.go`
-- [ ] T025 [P] [US2] Add adapter contract tests for start, stop, restart, and remove response/error mapping in `internal/podman/bindings_test.go`
+- [x] T023 [P] [US2] Add detail-view model tests for metadata, empty fields, stale selections, and target changes in `internal/app/detail_test.go`
+- [x] T024 [P] [US2] Add safety-dialog tests proving stop, restart, and remove require exact-target confirmation and cancellation sends no mutation in `internal/app/safety_test.go`
+- [x] T025 [P] [US2] Add adapter contract tests for start, stop, restart, and remove response/error mapping in `internal/podman/bindings_test.go`
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] Implement asynchronous container inspection and detail-domain translation in `internal/app/model.go` and `internal/podman/bindings.go`
-- [ ] T027 [US2] Render container details, ports, mounts, networks, and explicit unavailable values in `internal/ui/layout.go` and `internal/ui/components.go`
-- [ ] T028 [US2] Implement lifecycle commands and post-operation authoritative refresh in `internal/app/messages.go` and `internal/app/model.go`
-- [ ] T029 [US2] Implement target-aware confirmation dialogs and cancellation invalidation in `internal/app/model.go`, `internal/ui/components.go`, and `internal/ui/keys.go`
-- [ ] T030 [US2] Map stale-target, authorization, transport, and host errors to actionable operation feedback in `internal/podman/errors.go` and `internal/ui/layout.go`
+- [x] T026 [US2] Implement asynchronous container inspection and detail-domain translation in `internal/app/model.go` and `internal/podman/bindings.go`
+- [x] T027 [US2] Render container details, ports, mounts, networks, and explicit unavailable values in `internal/ui/layout.go` and `internal/ui/components.go`
+- [x] T028 [US2] Implement lifecycle commands and post-operation authoritative refresh in `internal/app/messages.go` and `internal/app/model.go`
+- [x] T029 [US2] Implement target-aware confirmation dialogs and cancellation invalidation in `internal/app/model.go`, `internal/ui/components.go`, and `internal/ui/keys.go`
+- [x] T030 [US2] Map stale-target, authorization, transport, and host errors to actionable operation feedback in `internal/podman/errors.go` and `internal/ui/layout.go`
 
 **Checkpoint**: User Stories 1 and 2 both work independently; every mutation is visible,
 confirmed when required, and followed by a host-authoritative refresh.
@@ -111,16 +111,16 @@ the stream, and verify that existing data remains visible with a stopped/current
 
 ### Tests for User Story 3
 
-- [ ] T031 [P] [US3] Add stream-model tests for log ordering, follow updates, cancellation, EOF, and partial-error preservation in `internal/app/stream_test.go`
-- [ ] T032 [P] [US3] Add stats-model tests for CPU/memory samples, timestamps, polling cancellation, and unavailable values in `internal/app/stats_test.go`
-- [ ] T033 [P] [US3] Add viewport rendering tests for log overflow, narrow terminals, and stopped streams in `internal/ui/stream_test.go`
+- [x] T031 [P] [US3] Add stream-model tests for log ordering, follow updates, cancellation, EOF, and partial-error preservation in `internal/app/stream_test.go`
+- [x] T032 [P] [US3] Add stats-model tests for CPU/memory samples, timestamps, polling cancellation, and unavailable values in `internal/app/stats_test.go`
+- [x] T033 [P] [US3] Add viewport rendering tests for log overflow, narrow terminals, and stopped streams in `internal/ui/stream_test.go`
 
 ### Implementation for User Story 3
 
-- [ ] T034 [US3] Implement cancellable log iteration and typed stream messages in `internal/podman/bindings.go` and `internal/app/messages.go`
-- [ ] T035 [US3] Implement log screen, follow toggle, viewport navigation, and partial-data status in `internal/app/model.go` and `internal/ui/layout.go`
-- [ ] T036 [US3] Implement cancellable stats polling and last-sample preservation in `internal/podman/bindings.go` and `internal/app/model.go`
-- [ ] T037 [US3] Render metrics cards, observation time, unavailable fields, and stopped-stream feedback in `internal/ui/layout.go` and `internal/ui/components.go`
+- [x] T034 [US3] Implement cancellable log iteration and typed stream messages in `internal/podman/bindings.go` and `internal/app/messages.go`
+- [x] T035 [US3] Implement log screen, follow toggle, viewport navigation, and partial-data status in `internal/app/model.go` and `internal/ui/layout.go`
+- [x] T036 [US3] Implement cancellable stats polling and last-sample preservation in `internal/podman/bindings.go` and `internal/app/model.go`
+- [x] T037 [US3] Render metrics cards, observation time, unavailable fields, and stopped-stream feedback in `internal/ui/layout.go` and `internal/ui/components.go`
 
 **Checkpoint**: All three user stories are independently demonstrable with deterministic fake
 streams and optional live Podman validation.
@@ -131,11 +131,11 @@ streams and optional live Podman validation.
 
 **Purpose**: Make the project distributable, documented, and repeatably verifiable.
 
-- [ ] T038 [P] Document connection setup, supported URI forms, credential boundaries, and troubleshooting in `docs/connections.md`
-- [ ] T039 [P] Document global and container keyboard bindings, confirmation behavior, and terminal sizing in `docs/keybindings.md`
-- [ ] T040 [P] Add user-facing project overview, screenshots or terminal recording guidance, build instructions, and scope boundaries in `README.md`
-- [ ] T041 [P] Add opt-in live-host integration test harness and environment contract in `tests/integration/podman_test.go`
-- [ ] T042 Run formatting, vet, unit tests, cross-platform builds, and quickstart acceptance checks; record any release blockers in `quickstart.md`
+- [x] T038 [P] Document connection setup, supported URI forms, credential boundaries, and troubleshooting in `docs/connections.md`
+- [x] T039 [P] Document global and container keyboard bindings, confirmation behavior, and terminal sizing in `docs/keybindings.md`
+- [x] T040 [P] Add user-facing project overview, screenshots or terminal recording guidance, build instructions, and scope boundaries in `README.md`
+- [x] T041 [P] Add opt-in live-host integration test harness and environment contract in `tests/integration/podman_test.go`
+- [x] T042 Run formatting, vet, unit tests, cross-platform builds, and quickstart acceptance checks; record any release blockers in `quickstart.md`
 - [ ] T043 Review dependency licenses and binary behavior, then prepare the first versioned release metadata in `LICENSE`, `.github/workflows/ci.yml`, and `cmd/podman-console/main.go`
 
 ---
