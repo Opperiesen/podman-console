@@ -44,8 +44,8 @@ cannot authorize a mutation after the active connection or selected image change
 
 ```text
 idle -> requested -> running -> succeeded -> refreshing -> idle
-                         \-> failed --------^          
-                         \-> cancelled -----^          
+                         \-> failed --------^
+                         \-> cancelled -----^
 ```
 
 Removal uses `requested -> confirming -> running -> succeeded/failed -> refreshing -> idle` and
