@@ -8,8 +8,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
-Inspect containers, read live logs, watch resource usage, and perform guarded lifecycle
-operations without leaving your terminal.
+Inspect containers, create detached workloads from local images, read live logs, watch resource
+usage, and perform guarded lifecycle operations without leaving your terminal.
 
 </div>
 
@@ -28,6 +28,7 @@ visually:
 - confirmation prompts that name the target before stop, restart, or removal;
 - ordered logs with optional follow mode;
 - CPU and memory samples that remain visible when a stream disconnects;
+- a focused local-image-to-container workflow with exact confirmation and partial-result feedback;
 - no daemon, database, password store, or private key handling in the application.
 
 ## Feature overview
@@ -37,7 +38,7 @@ visually:
 | Connections | Local Unix sockets and remote Podman sockets over SSH |
 | Inventory | Names, short IDs, images, and container states |
 | Details | Identifiers, image, state, ports, mounts, and networks |
-| Lifecycle | Start, stop, restart, and exact-ID removal with confirmation |
+| Lifecycle | Create/start from a local image, start, stop, restart, and exact-ID removal with confirmation |
 | Observability | Ordered logs, follow mode, CPU samples, and memory usage |
 | Images | Local image inventory, details, ordered pull progress, and safe exact-target removal |
 | Interface | Keyboard-first TUI built with Bubble Tea and Lip Gloss |
@@ -85,8 +86,9 @@ ssh://user@example.test/run/user/1000/podman/podman.sock
 ```
 
 For the complete acceptance workflow, including the disposable live-container test, see the
-[MVP quickstart](specs/001-podman-console-mvp/quickstart.md) and the
-[image management guide](docs/images.md).
+[MVP quickstart](specs/001-podman-console-mvp/quickstart.md), the
+[image management guide](docs/images.md), and the
+[container creation guide](docs/containers.md).
 
 ## Keyboard workflow
 
@@ -100,6 +102,7 @@ For the complete acceptance workflow, including the disposable live-container te
 | `s` / `x` / `R` / `D` | Start / stop / restart / remove |
 | `l` / `m` | Logs / metrics |
 | `i` | Open local images |
+| `n` (from Images) | Create and start a detached container from the selected local image |
 | `P` | Pull one image reference |
 | `?` | Help |
 
@@ -128,13 +131,19 @@ PODMAN_CONSOLE_TEST_CONTAINER='podman-console-live-test' \
 go test -tags=containers_image_openpgp,remote,integration -v ./tests/integration
 ```
 
+The opt-in create workflow additionally uses `PODMAN_CONSOLE_TEST_CREATE_IMAGE` and
+`PODMAN_CONSOLE_TEST_CREATE_NAME`; `PODMAN_CONSOLE_TEST_CREATE_COMMAND` can provide an optional
+argument-only command. The image must already be local, and the test refuses to touch an existing
+container with the requested name.
+
 CI validates tests, vet, version metadata, and cross-platform builds for Darwin, Linux, and
 Windows on amd64 and arm64.
 
 ## Scope
 
 The current release focuses on one active Podman target, its containers, and a narrow local-image
-workflow. Bulk operations, image building, pushing, registry administration, pod orchestration,
+workflow. Container creation accepts an explicit name and optional argument-only command; advanced
+run options, bulk operations, image building, pushing, registry administration, pod orchestration,
 and multi-host aggregation are intentionally outside the current scope.
 
 ## Contributing

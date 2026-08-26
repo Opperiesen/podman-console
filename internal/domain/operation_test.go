@@ -8,7 +8,7 @@ import (
 func TestActionDestructive(t *testing.T) {
 	t.Parallel()
 
-	for _, action := range []Action{ActionList, ActionInspect, ActionStart, ActionLogs, ActionStats, ActionImageList, ActionImageInspect, ActionImagePull} {
+	for _, action := range []Action{ActionList, ActionInspect, ActionStart, ActionContainerCreate, ActionLogs, ActionStats, ActionImageList, ActionImageInspect, ActionImagePull} {
 		if action.Destructive() {
 			t.Errorf("%q is destructive", action)
 		}

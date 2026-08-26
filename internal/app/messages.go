@@ -34,6 +34,22 @@ type DetailsLoadedMsg struct {
 	Err        error
 }
 
+type ContainerRunFinishedMsg struct {
+	Generation uint64
+	Target     string
+	Request    domain.ContainerCreateRequest
+	Result     domain.ContainerRunResult
+	Err        error
+}
+
+type ContainerCreateRefreshMsg struct {
+	Generation   uint64
+	Containers   []domain.ContainerSummary
+	Images       []domain.ImageSummary
+	ContainerErr error
+	ImageErr     error
+}
+
 type ImageInventoryLoadedMsg struct {
 	Generation uint64
 	Images     []domain.ImageSummary
@@ -120,6 +136,33 @@ func inspectContainerCmd(ctx context.Context, client podman.Client, id string, g
 		}
 		details, err := client.InspectContainer(ctx, id)
 		return DetailsLoadedMsg{Generation: generation, Details: details, Err: err}
+	}
+}
+
+func runContainerCmd(ctx context.Context, client podman.Client, request domain.ContainerCreateRequest, target string, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return ContainerRunFinishedMsg{Generation: generation, Target: target, Request: request, Err: context.Canceled}
+		}
+		result, err := client.RunContainer(ctx, request)
+		return ContainerRunFinishedMsg{Generation: generation, Target: target, Request: request, Result: result, Err: err}
+	}
+}
+
+func refreshAfterContainerCreateCmd(ctx context.Context, client podman.Client, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return ContainerCreateRefreshMsg{Generation: generation, ContainerErr: context.Canceled, ImageErr: context.Canceled}
+		}
+		containers, containerErr := client.ListContainers(ctx)
+		images, imageErr := client.ListImages(ctx)
+		return ContainerCreateRefreshMsg{
+			Generation:   generation,
+			Containers:   containers,
+			Images:       images,
+			ContainerErr: containerErr,
+			ImageErr:     imageErr,
+		}
 	}
 }
 

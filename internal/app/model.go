@@ -63,12 +63,13 @@ type Model struct {
 	generation    uint64
 	requestCancel context.CancelFunc
 
-	pendingAction     domain.Action
-	pendingTarget     string
-	pendingID         string
-	pendingResource   string
-	pendingGeneration uint64
-	pendingConnection string
+	pendingAction          domain.Action
+	pendingTarget          string
+	pendingID              string
+	pendingResource        string
+	pendingGeneration      uint64
+	pendingConnection      string
+	pendingContainerCreate domain.ContainerCreateRequest
 
 	profileCursor    int
 	profileInputs    []textinput.Model
@@ -95,6 +96,19 @@ type Model struct {
 	imagePullGeneration    uint64
 	imagePullTarget        string
 	imagePullCancel        context.CancelFunc
+
+	containerCreateInputs          []textinput.Model
+	containerCreateFocus           int
+	containerCreatePrevious        string
+	containerCreateRequest         domain.ContainerCreateRequest
+	containerCreateImageGeneration uint64
+	containerCreateError           error
+	containerCreateResult          domain.ContainerRunResult
+	containerCreateStatus          domain.ContainerCreateStatus
+	containerCreateRunning         bool
+	containerCreateRefreshing      bool
+	containerCreateGeneration      uint64
+	containerCreateTarget          string
 }
 
 func New(store *config.Store, factory podman.Factory) Model {
@@ -114,6 +128,15 @@ func New(store *config.Store, factory podman.Factory) Model {
 	pullInput.Placeholder = "registry.example/image:tag"
 	pullInput.CharLimit = 256
 	pullInput.SetWidth(64)
+	createInputs := make([]textinput.Model, 2)
+	createPlaceholders := []string{"nom du conteneur", "commande et arguments (optionnel)"}
+	for i := range createInputs {
+		createInputs[i] = textinput.New()
+		createInputs[i].Prompt = ""
+		createInputs[i].Placeholder = createPlaceholders[i]
+		createInputs[i].CharLimit = 512
+		createInputs[i].SetWidth(64)
+	}
 
 	inputs := make([]textinput.Model, 3)
 	placeholders := []string{"nom du profil", "unix:///… ou ssh://…", "chemin vers identity (optionnel)"}
@@ -126,22 +149,24 @@ func New(store *config.Store, factory podman.Factory) Model {
 	}
 
 	return Model{
-		store:            store,
-		factory:          factory,
-		ctx:              ctx,
-		cancel:           cancel,
-		file:             config.Default(),
-		keys:             ui.NewKeyMap(),
-		help:             help.New(),
-		screen:           ui.ScreenInventory,
-		mode:             ui.ModeNormal,
-		filterInput:      filter,
-		imageFilterInput: imageFilter,
-		profileInputs:    inputs,
-		viewport:         viewport.New(viewport.WithWidth(80), viewport.WithHeight(12)),
-		logFollow:        true,
-		imagePullInput:   pullInput,
-		imagePullStatus:  domain.ImageOperationIdle,
+		store:                 store,
+		factory:               factory,
+		ctx:                   ctx,
+		cancel:                cancel,
+		file:                  config.Default(),
+		keys:                  ui.NewKeyMap(),
+		help:                  help.New(),
+		screen:                ui.ScreenInventory,
+		mode:                  ui.ModeNormal,
+		filterInput:           filter,
+		imageFilterInput:      imageFilter,
+		profileInputs:         inputs,
+		viewport:              viewport.New(viewport.WithWidth(80), viewport.WithHeight(12)),
+		logFollow:             true,
+		imagePullInput:        pullInput,
+		imagePullStatus:       domain.ImageOperationIdle,
+		containerCreateInputs: createInputs,
+		containerCreateStatus: domain.ContainerCreateIdle,
 	}
 }
 
@@ -214,6 +239,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.details = &message.Details
 		m.err = nil
 		return m, nil
+	case ContainerRunFinishedMsg:
+		return m.handleContainerRunFinished(message)
+	case ContainerCreateRefreshMsg:
+		return m.handleContainerCreateRefresh(message)
 	case ImageInventoryLoadedMsg:
 		if message.Generation != m.generation {
 			return m, nil
@@ -280,51 +309,61 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) View() tea.View {
 	data := ui.ViewData{
-		Width:                 m.width,
-		Height:                m.height,
-		Screen:                m.screen,
-		Mode:                  m.mode,
-		Profile:               m.profile,
-		Connected:             m.connected,
-		Profiles:              m.file.Profiles,
-		ActiveProfile:         m.file.Active,
-		ProfileCursor:         m.profileCursor,
-		ProfileFields:         m.profileFieldValues(),
-		ProfileFocus:          m.profileFocus,
-		Containers:            m.visibleContainers(),
-		Selected:              m.selected,
-		Filter:                m.filter,
-		FilterEditing:         m.filtering,
-		Loading:               m.loading || m.detailLoading,
-		Images:                m.visibleImages(),
-		ImageSelected:         m.imageSelected,
-		ImageFilter:           m.imageFilter,
-		ImageFilterEditing:    m.imageFiltering,
-		ImageLoading:          m.imageLoading,
-		ImageDetailLoading:    m.imageDetailLoading,
-		ImageDetails:          m.imageDetails,
-		ImagePullReference:    m.imagePullReference,
-		ImagePullInput:        m.imagePullInput.Value(),
-		ImagePullInputEditing: m.screen == ui.ScreenImagePull && !m.imagePulling,
-		ImagePullEvents:       append([]domain.ImagePullEvent(nil), m.imagePullEvents...),
-		ImagePullStatus:       m.imagePullStatus,
-		ImagePullError:        m.imagePullError,
-		ImagePulling:          m.imagePulling,
-		ImagePullStopped:      m.imagePullStreamStopped,
-		Error:                 m.err,
-		Status:                m.status,
-		Details:               m.details,
-		LogContent:            m.viewport.View(),
-		LogFollow:             m.logFollow,
-		StreamStopped:         m.streamStopped,
-		Stats:                 m.stats,
-		ConfirmAction:         actionLabel(m.pendingAction),
-		ConfirmTarget:         m.pendingTarget,
-		ConfirmTargetID:       m.pendingID,
-		ConfirmResource:       m.pendingResource,
-		FormError:             m.profileFormError,
-		Help:                  m.help,
-		Keys:                  m.keys,
+		Width:                         m.width,
+		Height:                        m.height,
+		Screen:                        m.screen,
+		Mode:                          m.mode,
+		Profile:                       m.profile,
+		Connected:                     m.connected,
+		Profiles:                      m.file.Profiles,
+		ActiveProfile:                 m.file.Active,
+		ProfileCursor:                 m.profileCursor,
+		ProfileFields:                 m.profileFieldValues(),
+		ProfileFocus:                  m.profileFocus,
+		Containers:                    m.visibleContainers(),
+		Selected:                      m.selected,
+		Filter:                        m.filter,
+		FilterEditing:                 m.filtering,
+		Loading:                       m.loading || m.detailLoading,
+		Images:                        m.visibleImages(),
+		ImageSelected:                 m.imageSelected,
+		ImageFilter:                   m.imageFilter,
+		ImageFilterEditing:            m.imageFiltering,
+		ImageLoading:                  m.imageLoading,
+		ImageDetailLoading:            m.imageDetailLoading,
+		ImageDetails:                  m.imageDetails,
+		ImagePullReference:            m.imagePullReference,
+		ImagePullInput:                m.imagePullInput.Value(),
+		ImagePullInputEditing:         m.screen == ui.ScreenImagePull && !m.imagePulling,
+		ImagePullEvents:               append([]domain.ImagePullEvent(nil), m.imagePullEvents...),
+		ImagePullStatus:               m.imagePullStatus,
+		ImagePullError:                m.imagePullError,
+		ImagePulling:                  m.imagePulling,
+		ImagePullStopped:              m.imagePullStreamStopped,
+		ContainerCreateImageReference: m.containerCreateRequest.ImageReference,
+		ContainerCreateImageID:        m.containerCreateRequest.ImageID,
+		ContainerCreateFields:         m.containerCreateFieldValues(),
+		ContainerCreateFocus:          m.containerCreateFocus,
+		ContainerCreateRequest:        m.containerCreateRequest,
+		ContainerCreateStatus:         m.containerCreateStatus,
+		ContainerCreateError:          m.containerCreateError,
+		ContainerCreateResult:         m.containerCreateResult,
+		ContainerCreateRunning:        m.containerCreateRunning,
+		ContainerCreateRefreshing:     m.containerCreateRefreshing,
+		Error:                         m.err,
+		Status:                        m.status,
+		Details:                       m.details,
+		LogContent:                    m.viewport.View(),
+		LogFollow:                     m.logFollow,
+		StreamStopped:                 m.streamStopped,
+		Stats:                         m.stats,
+		ConfirmAction:                 actionLabel(m.pendingAction),
+		ConfirmTarget:                 m.pendingTarget,
+		ConfirmTargetID:               m.pendingID,
+		ConfirmResource:               m.pendingResource,
+		FormError:                     m.profileFormError,
+		Help:                          m.help,
+		Keys:                          m.keys,
 	}
 	v := tea.NewView(ui.Render(data))
 	v.AltScreen = true
@@ -391,24 +430,159 @@ func (m *Model) handleOperation(message OperationFinishedMsg) (tea.Model, tea.Cm
 	return m, tea.Batch(commands...)
 }
 
+func (m *Model) handleContainerRunFinished(message ContainerRunFinishedMsg) (tea.Model, tea.Cmd) {
+	if message.Generation != m.containerCreateGeneration || message.Target != m.containerCreateTarget {
+		return m, nil
+	}
+	m.requestCancel = nil
+	m.containerCreateRunning = false
+	m.containerCreateRequest = message.Request
+	m.containerCreateResult = message.Result
+	m.containerCreateError = nil
+	if message.Err != nil {
+		m.containerCreateError = friendlyContainerCreateError(message.Err, message.Result)
+		if message.Result.ContainerID != "" {
+			m.containerCreateStatus = domain.ContainerCreatePartial
+			m.status = fmt.Sprintf("Conteneur créé mais non démarré · ID %s · actualisation…", message.Result.ContainerID)
+			return m, m.refreshAfterContainerCreate()
+		}
+		if errors.Is(message.Err, context.Canceled) || errors.Is(message.Err, context.DeadlineExceeded) {
+			m.containerCreateStatus = domain.ContainerCreateCancelled
+			m.containerCreateError = nil
+			m.err = nil
+			m.status = "Création annulée ; aucune création confirmée par Podman."
+			return m, nil
+		}
+		m.containerCreateStatus = domain.ContainerCreateFailed
+		m.status = ""
+		m.err = m.containerCreateError
+		return m, nil
+	}
+	if !message.Result.Started {
+		m.containerCreateError = errors.New("Podman n’a pas confirmé le démarrage du conteneur")
+		if message.Result.ContainerID != "" {
+			m.containerCreateStatus = domain.ContainerCreatePartial
+			m.status = fmt.Sprintf("Conteneur créé mais non démarré · ID %s · actualisation…", message.Result.ContainerID)
+			return m, m.refreshAfterContainerCreate()
+		}
+		m.containerCreateStatus = domain.ContainerCreateFailed
+		m.status = ""
+		m.err = m.containerCreateError
+		return m, nil
+	}
+	m.containerCreateStatus = domain.ContainerCreateRefreshing
+	m.status = fmt.Sprintf("Conteneur démarré · actualisation des inventaires pour %s…", shortTarget(message.Result.ContainerID))
+	return m, m.refreshAfterContainerCreate()
+}
+
+func (m *Model) refreshAfterContainerCreate() tea.Cmd {
+	if m.client == nil {
+		m.containerCreateRefreshing = false
+		m.containerCreateStatus = domain.ContainerCreateFailed
+		m.err = errors.New("aucune cible Podman connectée pour actualiser les inventaires")
+		return nil
+	}
+	ctx, generation := m.beginRequest()
+	m.containerCreateGeneration = generation
+	m.containerCreateRefreshing = true
+	m.loading = true
+	m.imageLoading = true
+	return refreshAfterContainerCreateCmd(ctx, m.client, generation)
+}
+
+func (m *Model) handleContainerCreateRefresh(message ContainerCreateRefreshMsg) (tea.Model, tea.Cmd) {
+	if !m.containerCreateRefreshing || message.Generation != m.generation || message.Generation != m.containerCreateGeneration {
+		return m, nil
+	}
+	m.requestCancel = nil
+	m.containerCreateRefreshing = false
+	m.loading = false
+	m.imageLoading = false
+	m.screen = ui.ScreenInventory
+	m.mode = ui.ModeNormal
+	m.details = nil
+
+	if message.ContainerErr == nil {
+		m.containers = message.Containers
+		m.selected = clamp(m.selected, 0, len(m.visibleContainers())-1)
+		m.selectContainer(m.containerCreateResult.ContainerID)
+	}
+	if message.ImageErr == nil {
+		m.images = message.Images
+		m.imageSelected = clamp(m.imageSelected, 0, len(m.visibleImages())-1)
+	}
+
+	var refreshErr error
+	if message.ContainerErr != nil {
+		refreshErr = fmt.Errorf("conteneurs : %w", friendlyError(message.ContainerErr))
+	}
+	if message.ImageErr != nil {
+		imageErr := fmt.Errorf("images : %w", friendlyError(message.ImageErr))
+		if refreshErr == nil {
+			refreshErr = imageErr
+		} else {
+			refreshErr = fmt.Errorf("%v · %v", refreshErr, imageErr)
+		}
+	}
+
+	if refreshErr != nil {
+		m.err = fmt.Errorf("%w · conteneur créé avec l’ID %s", refreshErr, m.containerCreateResult.ContainerID)
+		m.status = fmt.Sprintf("Création terminée · actualisation incomplète · ID %s", m.containerCreateResult.ContainerID)
+		return m, nil
+	}
+	m.err = nil
+	if m.containerCreateStatus == domain.ContainerCreatePartial {
+		m.status = fmt.Sprintf("Conteneur créé mais non démarré · ID %s · inventaires actualisés", m.containerCreateResult.ContainerID)
+		if m.containerCreateError != nil {
+			m.status += " · " + m.containerCreateError.Error()
+		}
+	} else {
+		m.containerCreateStatus = domain.ContainerCreateSucceeded
+		m.status = fmt.Sprintf("Conteneur créé et démarré · ID %s · inventaires actualisés", m.containerCreateResult.ContainerID)
+	}
+	return m, nil
+}
+
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.mode == ui.ModeConfirm {
 		if key.Matches(msg, m.keys.Confirm) {
-			if m.pendingConnection != "" && (m.pendingGeneration != m.generation || m.pendingConnection != m.connectionIdentity()) {
+			stale := m.pendingConnection != "" && (m.pendingGeneration != m.generation || m.pendingConnection != m.connectionIdentity())
+			if m.pendingAction == domain.ActionContainerCreate && (!m.containerCreateImageIsCurrent() || m.containerCreateImageGeneration != m.generation) {
+				stale = true
+			}
+			if stale {
 				m.mode = ui.ModeNormal
+				wasContainerCreate := m.pendingAction == domain.ActionContainerCreate
 				m.resetPendingConfirmation()
-				m.err = errors.New("la cible de confirmation n’est plus active")
+				if wasContainerCreate {
+					m.containerCreateStatus = domain.ContainerCreateFailed
+					m.containerCreateError = errors.New("l’image ou la cible de confirmation n’est plus active")
+					m.err = m.containerCreateError
+				} else {
+					m.err = errors.New("la cible de confirmation n’est plus active")
+				}
 				return m, nil
 			}
 			action, id := m.pendingAction, m.pendingID
+			request := m.pendingContainerCreate
 			m.mode = ui.ModeNormal
 			m.resetPendingConfirmation()
+			if action == domain.ActionContainerCreate {
+				return m, m.runContainerCreate(request)
+			}
 			return m, m.runOperation(action, id)
 		}
 		if key.Matches(msg, m.keys.Cancel) {
+			wasContainerCreate := m.pendingAction == domain.ActionContainerCreate
 			m.mode = ui.ModeNormal
 			m.resetPendingConfirmation()
-			m.status = "Opération annulée ; la cible n’a pas été modifiée."
+			if wasContainerCreate {
+				m.containerCreateStatus = domain.ContainerCreateEditing
+				m.containerCreateError = nil
+				m.status = "Création annulée ; aucune mutation envoyée."
+			} else {
+				m.status = "Opération annulée ; la cible n’a pas été modifiée."
+			}
 			return m, nil
 		}
 		return m, nil
@@ -456,6 +630,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.screen == ui.ScreenImagePull {
 		return m.handleImagePullKey(msg)
+	}
+	if m.screen == ui.ScreenContainerCreate {
+		return m.handleContainerCreateKey(msg)
 	}
 	if m.mode == ui.ModeProfiles {
 		return m.handleProfilesKey(msg)
@@ -550,6 +727,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Open) && m.screen == ui.ScreenImages {
 		return m, m.openImageDetails()
 	}
+	if key.Matches(msg, m.keys.New) && (m.screen == ui.ScreenImages || m.screen == ui.ScreenImageDetails) {
+		return m, m.openContainerCreate()
+	}
 	if key.Matches(msg, m.keys.Pull) && (m.screen == ui.ScreenImages || m.screen == ui.ScreenImageDetails) {
 		return m, m.openImagePull()
 	}
@@ -590,6 +770,203 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *Model) handleContainerCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		m.cancel()
+		m.stopStream()
+		m.stopImagePull()
+		return m, tea.Quit
+	}
+	if (m.containerCreateRunning || m.containerCreateRefreshing) && key.Matches(msg, m.keys.Quit) {
+		m.cancel()
+		m.stopStream()
+		m.stopImagePull()
+		return m, tea.Quit
+	}
+	if msg.String() == "?" {
+		m.help.ShowAll = !m.help.ShowAll
+		return m, nil
+	}
+	if m.containerCreateRunning || m.containerCreateRefreshing {
+		if msg.String() == "esc" && m.requestCancel != nil {
+			m.requestCancel()
+			m.status = "Annulation demandée ; vérification de l’état auprès de Podman…"
+		}
+		return m, nil
+	}
+	if msg.String() == "esc" {
+		m.blurContainerCreateInputs()
+		m.screen = m.containerCreatePrevious
+		m.containerCreateStatus = domain.ContainerCreateIdle
+		m.containerCreateError = nil
+		return m, nil
+	}
+	if msg.String() == "tab" || msg.String() == "shift+tab" {
+		if msg.String() == "shift+tab" {
+			m.containerCreateFocus = clamp(m.containerCreateFocus-1, 0, len(m.containerCreateInputs)-1)
+		} else {
+			m.containerCreateFocus = (m.containerCreateFocus + 1) % len(m.containerCreateInputs)
+		}
+		return m, m.focusContainerCreateInput()
+	}
+	if msg.String() == "enter" {
+		return m, m.submitContainerCreateForm()
+	}
+	updated, cmd := m.containerCreateInputs[m.containerCreateFocus].Update(msg)
+	m.containerCreateInputs[m.containerCreateFocus] = updated
+	m.containerCreateError = updated.Err
+	return m, cmd
+}
+
+func (m *Model) openContainerCreate() tea.Cmd {
+	if m.client == nil {
+		m.err = fmt.Errorf("aucune cible Podman connectée")
+		return nil
+	}
+	var image domain.ImageSummary
+	var ok bool
+	if m.screen == ui.ScreenImageDetails && m.imageDetails != nil {
+		image = m.imageDetails.ImageSummary
+		if image.ID == "" {
+			image.ID = m.imageDetails.ID
+		}
+		ok = image.ID != ""
+	} else {
+		image, ok = m.selectedImage()
+	}
+	if !ok || image.ID == "" {
+		m.err = fmt.Errorf("aucune image locale sélectionnée")
+		return nil
+	}
+	m.containerCreatePrevious = m.screen
+	m.containerCreateImageGeneration = m.generation
+	m.containerCreateRequest = domain.ContainerCreateRequest{
+		ImageID:        image.ID,
+		ImageReference: image.PrimaryReference(),
+	}
+	m.containerCreateResult = domain.ContainerRunResult{}
+	m.containerCreateError = nil
+	m.containerCreateStatus = domain.ContainerCreateEditing
+	m.containerCreateRunning = false
+	m.containerCreateRefreshing = false
+	m.containerCreateFocus = 0
+	m.containerCreateInputs[0].SetValue("")
+	m.containerCreateInputs[1].SetValue("")
+	m.blurContainerCreateInputs()
+	m.screen = ui.ScreenContainerCreate
+	m.err = nil
+	return m.focusContainerCreateInput()
+}
+
+func (m *Model) submitContainerCreateForm() tea.Cmd {
+	if m.client == nil {
+		m.containerCreateError = errors.New("aucune cible Podman connectée")
+		return nil
+	}
+	if m.containerCreateImageGeneration != m.generation || !m.containerCreateImageIsCurrent() {
+		m.containerCreateError = errors.New("l’image sélectionnée n’est plus disponible ; actualisez l’inventaire")
+		m.containerCreateStatus = domain.ContainerCreateFailed
+		return nil
+	}
+	command, err := domain.ParseContainerCommand(m.containerCreateInputs[1].Value())
+	if err != nil {
+		m.containerCreateError = err
+		m.containerCreateStatus = domain.ContainerCreateEditing
+		return nil
+	}
+	request := domain.ContainerCreateRequest{
+		ImageID:        m.containerCreateRequest.ImageID,
+		ImageReference: m.containerCreateRequest.ImageReference,
+		Name:           m.containerCreateInputs[0].Value(),
+		Command:        command,
+	}
+	if err := request.Validate(); err != nil {
+		m.containerCreateError = err
+		m.containerCreateStatus = domain.ContainerCreateEditing
+		return nil
+	}
+	m.containerCreateRequest = request
+	m.pendingContainerCreate = request
+	m.pendingAction = domain.ActionContainerCreate
+	m.pendingID = request.ImageID
+	m.pendingTarget = request.Name
+	m.pendingResource = "container_create"
+	m.pendingGeneration = m.containerCreateImageGeneration
+	m.pendingConnection = m.connectionIdentity()
+	m.containerCreateStatus = domain.ContainerCreateConfirming
+	m.containerCreateError = nil
+	m.err = nil
+	m.mode = ui.ModeConfirm
+	return nil
+}
+
+func (m *Model) runContainerCreate(request domain.ContainerCreateRequest) tea.Cmd {
+	if err := request.Validate(); err != nil {
+		m.containerCreateStatus = domain.ContainerCreateFailed
+		m.containerCreateError = err
+		m.err = err
+		return nil
+	}
+	if m.client == nil {
+		m.containerCreateStatus = domain.ContainerCreateFailed
+		m.containerCreateError = errors.New("aucune cible Podman connectée")
+		m.err = m.containerCreateError
+		return nil
+	}
+	if !m.containerCreateImageIsCurrent() {
+		m.containerCreateStatus = domain.ContainerCreateFailed
+		m.containerCreateError = errors.New("l’image sélectionnée n’est plus disponible ; création refusée")
+		m.err = m.containerCreateError
+		return nil
+	}
+	if m.containerCreateRunning || m.containerCreateRefreshing {
+		return nil
+	}
+	ctx, generation := m.beginRequest()
+	m.containerCreateRequest = request
+	m.containerCreateResult = domain.ContainerRunResult{}
+	m.containerCreateError = nil
+	m.containerCreateStatus = domain.ContainerCreateCreating
+	m.containerCreateRunning = true
+	m.containerCreateTarget = m.connectionIdentity()
+	m.containerCreateGeneration = generation
+	m.err = nil
+	m.status = fmt.Sprintf("Création puis démarrage de %s…", request.Name)
+	return runContainerCmd(ctx, m.client, request, m.containerCreateTarget, generation)
+}
+
+func (m *Model) focusContainerCreateInput() tea.Cmd {
+	m.blurContainerCreateInputs()
+	return m.containerCreateInputs[m.containerCreateFocus].Focus()
+}
+
+func (m *Model) blurContainerCreateInputs() {
+	for i := range m.containerCreateInputs {
+		m.containerCreateInputs[i].Blur()
+	}
+}
+
+func (m *Model) containerCreateFieldValues() []string {
+	values := make([]string, len(m.containerCreateInputs))
+	for i := range m.containerCreateInputs {
+		values[i] = m.containerCreateInputs[i].Value()
+	}
+	return values
+}
+
+func (m *Model) containerCreateImageIsCurrent() bool {
+	imageID := m.containerCreateRequest.ImageID
+	if imageID == "" {
+		return false
+	}
+	for _, image := range m.images {
+		if image.ID == imageID {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) handleProfilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -735,6 +1112,18 @@ func (m *Model) removeProfile() tea.Cmd {
 func (m *Model) beginProfile(profile domain.ConnectionProfile) tea.Cmd {
 	m.stopStream()
 	m.stopImagePull()
+	if m.containerCreateRunning || m.containerCreateRefreshing {
+		if m.requestCancel != nil {
+			m.requestCancel()
+		}
+	}
+	m.containerCreateRunning = false
+	m.containerCreateRefreshing = false
+	m.containerCreateStatus = domain.ContainerCreateIdle
+	m.containerCreateError = nil
+	m.containerCreateResult = domain.ContainerRunResult{}
+	m.containerCreateRequest = domain.ContainerCreateRequest{}
+	m.containerCreateImageGeneration = 0
 	m.profile = profile
 	m.file.Active = profile.Name
 	_ = m.saveConfig()
@@ -1024,6 +1413,7 @@ func (m *Model) resetPendingConfirmation() {
 	m.pendingResource = ""
 	m.pendingGeneration = 0
 	m.pendingConnection = ""
+	m.pendingContainerCreate = domain.ContainerCreateRequest{}
 }
 
 func (m *Model) connectionIdentity() string {
@@ -1206,6 +1596,18 @@ func (m *Model) selectedContainer() (domain.ContainerSummary, bool) {
 	return containers[m.selected], true
 }
 
+func (m *Model) selectContainer(id string) {
+	if id == "" {
+		return
+	}
+	for i, container := range m.visibleContainers() {
+		if container.ID == id {
+			m.selected = i
+			return
+		}
+	}
+}
+
 func (m *Model) selectedImage() (domain.ImageSummary, bool) {
 	images := m.visibleImages()
 	if m.imageSelected < 0 || m.imageSelected >= len(images) {
@@ -1309,6 +1711,12 @@ func friendlyError(err error) error {
 			prefix = "Registre indisponible ou référence refusée"
 		case domain.ErrorInUse:
 			prefix = "Image utilisée par un conteneur"
+		case domain.ErrorNameConflict:
+			prefix = "Nom de conteneur déjà utilisé"
+		case domain.ErrorInvalidConfig:
+			prefix = "Configuration invalide"
+		case domain.ErrorPartial:
+			prefix = "Création partielle"
 		case domain.ErrorMalformedStream:
 			prefix = "Flux Podman invalide"
 		case domain.ErrorCancelled:
@@ -1319,6 +1727,21 @@ func friendlyError(err error) error {
 		return fmt.Errorf("%s : %s", prefix, podman.ErrorMessage(err))
 	}
 	return err
+}
+
+func friendlyContainerCreateError(err error, result domain.ContainerRunResult) error {
+	if err == nil {
+		return nil
+	}
+	var operation *domain.OperationError
+	if errors.As(err, &operation) && operation.Category == domain.ErrorPartial {
+		message := operation.Err
+		if message == nil {
+			message = errors.New("le démarrage n’a pas abouti")
+		}
+		return fmt.Errorf("créé mais non démarré · ID %s : %s", result.ContainerID, friendlyError(message))
+	}
+	return friendlyOperationError(domain.ActionContainerCreate, err)
 }
 
 func friendlyImagePullError(err error) error {
@@ -1387,6 +1810,8 @@ func actionLabel(action domain.Action) string {
 		return "Suppression"
 	case domain.ActionImageRemove:
 		return "Suppression"
+	case domain.ActionContainerCreate:
+		return "Création de conteneur"
 	default:
 		return string(action)
 	}

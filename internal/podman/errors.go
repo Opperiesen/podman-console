@@ -37,6 +37,11 @@ func classify(err error) domain.ErrorCategory {
 			return domain.ErrorInUse
 		}
 	}
+	for _, marker := range []string{"name is already in use", "container name is already in use", "already exists with name"} {
+		if strings.Contains(message, marker) {
+			return domain.ErrorNameConflict
+		}
+	}
 	for _, marker := range []string{"manifest unknown", "name unknown", "repository does not exist", "pull access denied", "requested access to the resource is denied", "toomanyrequests", "rate limit"} {
 		if strings.Contains(message, marker) {
 			return domain.ErrorRegistry
