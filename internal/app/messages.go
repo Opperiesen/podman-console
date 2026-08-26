@@ -34,6 +34,19 @@ type DetailsLoadedMsg struct {
 	Err        error
 }
 
+type ImageInventoryLoadedMsg struct {
+	Generation uint64
+	Images     []domain.ImageSummary
+	Err        error
+}
+
+type ImageDetailsLoadedMsg struct {
+	Generation uint64
+	TargetID   string
+	Details    domain.ImageDetails
+	Err        error
+}
+
 type OperationFinishedMsg struct {
 	Generation uint64
 	Action     domain.Action
@@ -55,6 +68,15 @@ type statsStreamEvent struct {
 	Err        error
 	Done       bool
 	Next       <-chan statsStreamEvent
+}
+
+type imagePullStreamEvent struct {
+	Generation uint64
+	Target     string
+	Event      *domain.ImagePullEvent
+	Err        error
+	Done       bool
+	Next       <-chan imagePullStreamEvent
 }
 
 func loadConfigCmd(store *config.Store) tea.Cmd {
@@ -101,6 +123,26 @@ func inspectContainerCmd(ctx context.Context, client podman.Client, id string, g
 	}
 }
 
+func listImagesCmd(ctx context.Context, client podman.Client, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return ImageInventoryLoadedMsg{Generation: generation, Err: context.Canceled}
+		}
+		images, err := client.ListImages(ctx)
+		return ImageInventoryLoadedMsg{Generation: generation, Images: images, Err: err}
+	}
+}
+
+func inspectImageCmd(ctx context.Context, client podman.Client, id string, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return ImageDetailsLoadedMsg{Generation: generation, TargetID: id, Err: context.Canceled}
+		}
+		details, err := client.InspectImage(ctx, id)
+		return ImageDetailsLoadedMsg{Generation: generation, TargetID: id, Details: details, Err: err}
+	}
+}
+
 func operationCmd(ctx context.Context, client podman.Client, action domain.Action, id string, generation uint64) tea.Cmd {
 	return func() tea.Msg {
 		var err error
@@ -116,11 +158,57 @@ func operationCmd(ctx context.Context, client podman.Client, action domain.Actio
 				err = client.Restart(ctx, id)
 			case domain.ActionRemove:
 				err = client.Remove(ctx, id)
+			case domain.ActionImageRemove:
+				err = client.RemoveImage(ctx, id)
 			default:
 				err = context.Canceled
 			}
 		}
 		return OperationFinishedMsg{Generation: generation, Action: action, TargetID: id, Err: err}
+	}
+}
+
+func startImagePullCmd(ctx context.Context, client podman.Client, reference, target string, generation uint64) tea.Cmd {
+	channel := make(chan imagePullStreamEvent, 1)
+	go func() {
+		var err error
+		if client == nil {
+			err = context.Canceled
+		} else {
+			err = client.PullImage(ctx, reference, func(event domain.ImagePullEvent) {
+				event.Target = target
+				if event.Reference == "" {
+					event.Reference = reference
+				}
+				select {
+				case channel <- imagePullStreamEvent{Generation: generation, Target: target, Event: &event}:
+				case <-ctx.Done():
+				}
+			})
+		}
+		select {
+		case channel <- imagePullStreamEvent{Generation: generation, Target: target, Done: true, Err: err}:
+		case <-ctx.Done():
+			select {
+			case channel <- imagePullStreamEvent{Generation: generation, Target: target, Done: true, Err: ctx.Err()}:
+			default:
+			}
+		}
+		close(channel)
+	}()
+	return waitImagePullStream(channel, target, generation)
+}
+
+func waitImagePullStream(channel <-chan imagePullStreamEvent, target string, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		event, ok := <-channel
+		if !ok {
+			return imagePullStreamEvent{Generation: generation, Target: target, Done: true}
+		}
+		event.Generation = generation
+		event.Target = target
+		event.Next = channel
+		return event
 	}
 }
 

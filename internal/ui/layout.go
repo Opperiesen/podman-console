@@ -11,44 +11,63 @@ import (
 )
 
 const (
-	ScreenInventory = "inventory"
-	ScreenDetails   = "details"
-	ScreenLogs      = "logs"
-	ScreenStats     = "stats"
-	ModeNormal      = "normal"
-	ModeProfiles    = "profiles"
-	ModeProfileForm = "profile_form"
-	ModeConfirm     = "confirm"
+	ScreenInventory    = "inventory"
+	ScreenDetails      = "details"
+	ScreenLogs         = "logs"
+	ScreenStats        = "stats"
+	ScreenImages       = "images"
+	ScreenImageDetails = "image_details"
+	ScreenImagePull    = "image_pull"
+	ModeNormal         = "normal"
+	ModeProfiles       = "profiles"
+	ModeProfileForm    = "profile_form"
+	ModeConfirm        = "confirm"
 )
 
 type ViewData struct {
-	Width, Height   int
-	Screen, Mode    string
-	Profile         domain.ConnectionProfile
-	Connected       bool
-	Profiles        []domain.ConnectionProfile
-	ActiveProfile   string
-	ProfileCursor   int
-	ProfileFields   []string
-	ProfileFocus    int
-	Containers      []domain.ContainerSummary
-	Selected        int
-	Filter          string
-	FilterEditing   bool
-	Loading         bool
-	Error           error
-	Status          string
-	Details         *domain.ContainerDetails
-	LogContent      string
-	LogFollow       bool
-	StreamStopped   bool
-	Stats           *domain.ContainerStats
-	ConfirmAction   string
-	ConfirmTarget   string
-	ConfirmTargetID string
-	FormError       error
-	Help            help.Model
-	Keys            KeyMap
+	Width, Height         int
+	Screen, Mode          string
+	Profile               domain.ConnectionProfile
+	Connected             bool
+	Profiles              []domain.ConnectionProfile
+	ActiveProfile         string
+	ProfileCursor         int
+	ProfileFields         []string
+	ProfileFocus          int
+	Containers            []domain.ContainerSummary
+	Selected              int
+	Filter                string
+	FilterEditing         bool
+	Images                []domain.ImageSummary
+	ImageSelected         int
+	ImageFilter           string
+	ImageFilterEditing    bool
+	ImageLoading          bool
+	ImageDetailLoading    bool
+	ImageDetails          *domain.ImageDetails
+	ImagePullReference    string
+	ImagePullInput        string
+	ImagePullInputEditing bool
+	ImagePullEvents       []domain.ImagePullEvent
+	ImagePullStatus       domain.ImageOperationStatus
+	ImagePullError        error
+	ImagePulling          bool
+	ImagePullStopped      bool
+	Loading               bool
+	Error                 error
+	Status                string
+	Details               *domain.ContainerDetails
+	LogContent            string
+	LogFollow             bool
+	StreamStopped         bool
+	Stats                 *domain.ContainerStats
+	ConfirmAction         string
+	ConfirmTarget         string
+	ConfirmTargetID       string
+	ConfirmResource       string
+	FormError             error
+	Help                  help.Model
+	Keys                  KeyMap
 }
 
 func Render(data ViewData) string {
@@ -74,6 +93,9 @@ func Render(data ViewData) string {
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	if data.Mode == ModeConfirm {
 		dialog := Confirmation(data.Profile.DisplayName(), data.ConfirmAction, data.ConfirmTarget, data.ConfirmTargetID)
+		if data.ConfirmResource == "image" {
+			dialog = ResourceConfirmation(data.Profile.DisplayName(), data.ConfirmAction, "image", data.ConfirmTarget, data.ConfirmTargetID)
+		}
 		content = lipgloss.JoinVertical(lipgloss.Left, content, "", dialog)
 	}
 	if data.Mode == ModeProfileForm {
@@ -93,6 +115,12 @@ func renderBody(data ViewData, width, height int) string {
 	switch data.Screen {
 	case ScreenDetails:
 		return renderDetails(data)
+	case ScreenImages:
+		return renderImages(data)
+	case ScreenImageDetails:
+		return renderImageDetails(data)
+	case ScreenImagePull:
+		return renderImagePull(data, width, height)
 	case ScreenLogs:
 		return renderLogs(data, width, height)
 	case ScreenStats:
@@ -123,6 +151,44 @@ func renderInventory(data ViewData) string {
 		lines = append(lines, ContainerRow(container, i == data.Selected))
 	}
 	return PanelStyle.Render(strings.Join(lines, "\n"))
+}
+
+func renderImages(data ViewData) string {
+	lines := []string{TitleStyle.Render("PODMAN CONSOLE / IMAGES")}
+	filter := data.ImageFilter
+	if data.ImageFilterEditing {
+		filter += "▌"
+	}
+	if filter != "" {
+		lines = append(lines, MutedStyle.Render("Filtre: ")+filter)
+	}
+	if data.ImageLoading {
+		lines = append(lines, WarningStyle.Render("Chargement de l’inventaire images…"))
+	}
+	if len(data.Images) == 0 && !data.ImageLoading {
+		lines = append(lines, ImageEmptyState(data.ImageFilter))
+		return PanelStyle.Render(strings.Join(lines, "\n"))
+	}
+	lines = append(lines, ImageHeader())
+	for i, image := range data.Images {
+		lines = append(lines, ImageRow(image, i == data.ImageSelected))
+	}
+	return PanelStyle.Render(strings.Join(lines, "\n"))
+}
+
+func renderImageDetails(data ViewData) string {
+	name := "image"
+	if data.ImageDetails != nil {
+		name = imageTarget(data.ImageDetails.ImageSummary)
+	}
+	return PanelStyle.Render(strings.Join([]string{
+		TitleStyle.Render("DÉTAILS IMAGE / " + name),
+		ImageDetailView(data.ImageDetails, data.ImageDetailLoading),
+	}, "\n"))
+}
+
+func renderImagePull(data ViewData, width, height int) string {
+	return PanelStyle.Width(max(20, width-4)).Render(ImagePullView(data, height))
 }
 
 func renderDetails(data ViewData) string {
@@ -190,6 +256,12 @@ func renderHelp(data ViewData) string {
 		bindings = []key.Binding{data.Keys.Start, data.Keys.Stop, data.Keys.Restart, data.Keys.Remove, data.Keys.Logs, data.Keys.Stats, data.Keys.Back, data.Keys.Help, data.Keys.Quit}
 	case data.Screen == ScreenLogs || data.Screen == ScreenStats:
 		bindings = []key.Binding{data.Keys.Follow, data.Keys.Back, data.Keys.Help, data.Keys.Quit}
+	case data.Screen == ScreenImagePull:
+		bindings = []key.Binding{data.Keys.Confirm, data.Keys.Back, data.Keys.Help, data.Keys.Quit}
+	case data.Screen == ScreenImageDetails:
+		bindings = []key.Binding{data.Keys.Pull, data.Keys.Remove, data.Keys.Refresh, data.Keys.Back, data.Keys.Help, data.Keys.Quit}
+	case data.Screen == ScreenImages:
+		bindings = []key.Binding{data.Keys.Up, data.Keys.Down, data.Keys.Open, data.Keys.Pull, data.Keys.Remove, data.Keys.Refresh, data.Keys.Filter, data.Keys.Images, data.Keys.Back, data.Keys.Help, data.Keys.Quit}
 	default:
 		bindings = []key.Binding{data.Keys.Up, data.Keys.Down, data.Keys.Open, data.Keys.Refresh, data.Keys.Filter, data.Keys.Profiles, data.Keys.Logs, data.Keys.Stats, data.Keys.Help, data.Keys.Quit}
 	}

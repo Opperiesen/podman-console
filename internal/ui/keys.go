@@ -9,6 +9,8 @@ type KeyMap struct {
 	Help     key.Binding
 	Refresh  key.Binding
 	Profiles key.Binding
+	Images   key.Binding
+	Pull     key.Binding
 	Back     key.Binding
 	Confirm  key.Binding
 	Cancel   key.Binding
@@ -34,6 +36,8 @@ func NewKeyMap() KeyMap {
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "aide")),
 		Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "actualiser")),
 		Profiles: key.NewBinding(key.WithKeys("c", "p"), key.WithHelp("c", "profils")),
+		Images:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "images")),
+		Pull:     key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "télécharger")),
 		Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "retour")),
 		Confirm:  key.NewBinding(key.WithKeys("enter", "y"), key.WithHelp("enter", "confirmer")),
 		Cancel:   key.NewBinding(key.WithKeys("esc", "n"), key.WithHelp("esc", "annuler")),

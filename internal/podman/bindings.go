@@ -2,6 +2,7 @@ package podman
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -13,6 +14,9 @@ import (
 	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/bindings"
 	"go.podman.io/podman/v6/pkg/bindings/containers"
+	"go.podman.io/podman/v6/pkg/bindings/images"
+	imageTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
+	"go.podman.io/podman/v6/pkg/inspect"
 )
 
 type BindingsFactory struct{}
@@ -25,11 +29,12 @@ func (BindingsFactory) Connect(ctx context.Context, profile domain.ConnectionPro
 	if err != nil {
 		return nil, Wrap(domain.ActionList, profile.Name, err)
 	}
-	return &bindingsClient{base: connectionCtx}, nil
+	return &bindingsClient{base: connectionCtx, target: profile.Name}, nil
 }
 
 type bindingsClient struct {
-	base context.Context
+	base   context.Context
+	target string
 }
 
 func (c *bindingsClient) operationContext(ctx context.Context) (context.Context, func()) {
@@ -237,6 +242,196 @@ func (c *bindingsClient) StreamStats(ctx context.Context, id string, emit func(d
 			return Wrap(domain.ActionStats, id, ctx.Err())
 		}
 	}
+}
+
+func (c *bindingsClient) ListImages(ctx context.Context) ([]domain.ImageSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, Wrap(domain.ActionImageList, "", err)
+	}
+	opCtx, done := c.operationContext(ctx)
+	defer done()
+	all := true
+	rows, err := images.List(opCtx, &images.ListOptions{All: &all})
+	if err != nil {
+		return nil, Wrap(domain.ActionImageList, "", err)
+	}
+	result := make([]domain.ImageSummary, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result = append(result, convertImageSummary(row))
+	}
+	return result, nil
+}
+
+func (c *bindingsClient) InspectImage(ctx context.Context, id string) (domain.ImageDetails, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ImageDetails{}, Wrap(domain.ActionImageInspect, id, err)
+	}
+	opCtx, done := c.operationContext(ctx)
+	defer done()
+	report, err := images.GetImage(opCtx, id, &images.GetOptions{})
+	if err != nil {
+		return domain.ImageDetails{}, Wrap(domain.ActionImageInspect, id, err)
+	}
+	if report == nil || report.ImageData == nil {
+		return domain.ImageDetails{}, Wrap(domain.ActionImageInspect, id, fmt.Errorf("empty image inspect response"))
+	}
+	return convertImageDetails(report.ImageData), nil
+}
+
+func (c *bindingsClient) PullImage(ctx context.Context, reference string, emit func(domain.ImagePullEvent)) error {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return Wrap(domain.ActionImagePull, reference, errors.New("image reference cannot be empty"))
+	}
+	if err := ctx.Err(); err != nil {
+		return Wrap(domain.ActionImagePull, reference, err)
+	}
+	opCtx, done := c.operationContext(ctx)
+	defer done()
+	if emit == nil {
+		emit = func(domain.ImagePullEvent) {}
+	}
+	writer := &imagePullWriter{target: c.target, reference: reference, emit: emit}
+	options := (&images.PullOptions{}).
+		WithAllTags(false).
+		WithQuiet(false).
+		WithProgressWriter(writer)
+	imageIDs, err := images.Pull(opCtx, reference, options)
+	if opCtx.Err() != nil {
+		err = opCtx.Err()
+	}
+	if err != nil {
+		kind := domain.ImagePullError
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			kind = domain.ImagePullCancelled
+		}
+		emit(domain.ImagePullEvent{Target: c.target, Reference: reference, Kind: kind, Text: ErrorMessage(err)})
+		return Wrap(domain.ActionImagePull, reference, err)
+	}
+	emit(domain.ImagePullEvent{Target: c.target, Reference: reference, Kind: domain.ImagePullSuccess, ImageIDs: append([]string(nil), imageIDs...)})
+	return nil
+}
+
+func (c *bindingsClient) RemoveImage(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Wrap(domain.ActionImageRemove, id, errors.New("image identity cannot be empty"))
+	}
+	if err := ctx.Err(); err != nil {
+		return Wrap(domain.ActionImageRemove, id, err)
+	}
+	opCtx, done := c.operationContext(ctx)
+	defer done()
+	falseValue := false
+	report, errs := images.Remove(opCtx, []string{id}, (&images.RemoveOptions{}).
+		WithAll(falseValue).
+		WithForce(falseValue).
+		WithIgnore(falseValue).
+		WithLookupManifest(falseValue).
+		// NoPrune=true prevents Podman from removing dangling parent images as
+		// a side effect of this exact-target operation.
+		WithNoPrune(true))
+	if opCtx.Err() != nil {
+		return Wrap(domain.ActionImageRemove, id, opCtx.Err())
+	}
+	if len(errs) > 0 {
+		return Wrap(domain.ActionImageRemove, id, errors.Join(errs...))
+	}
+	if report == nil {
+		return Wrap(domain.ActionImageRemove, id, fmt.Errorf("empty image removal response"))
+	}
+	return nil
+}
+
+type imagePullWriter struct {
+	target    string
+	reference string
+	emit      func(domain.ImagePullEvent)
+}
+
+func (w *imagePullWriter) Write(value []byte) (int, error) {
+	if len(value) > 0 {
+		w.emit(domain.ImagePullEvent{
+			Target: w.target, Reference: w.reference, Kind: domain.ImagePullProgress, Text: string(value),
+		})
+	}
+	return len(value), nil
+}
+
+func convertImageSummary(row *imageTypes.ImageSummary) domain.ImageSummary {
+	if row == nil {
+		return domain.ImageSummary{}
+	}
+	createdAt := time.Time{}
+	if row.Created != 0 {
+		createdAt = time.Unix(row.Created, 0)
+	}
+	return domain.ImageSummary{
+		ID:         row.ID,
+		References: uniqueStrings(append(append([]string(nil), row.RepoTags...), row.Names...)),
+		Digests:    uniqueStrings(row.RepoDigests),
+		Digest:     row.Digest,
+		Size:       nonNegativeSize(row.Size),
+		CreatedAt:  createdAt,
+		Containers: row.Containers,
+		Dangling:   row.Dangling,
+		ReadOnly:   row.ReadOnly,
+	}
+}
+
+func convertImageDetails(data *inspect.ImageData) domain.ImageDetails {
+	if data == nil {
+		return domain.ImageDetails{}
+	}
+	createdAt := time.Time{}
+	if data.Created != nil {
+		createdAt = *data.Created
+	}
+	labels := make(map[string]string, len(data.Labels))
+	for key, value := range data.Labels {
+		labels[key] = value
+	}
+	return domain.ImageDetails{
+		ImageSummary: domain.ImageSummary{
+			ID:         data.ID,
+			References: uniqueStrings(data.RepoTags),
+			Digests:    uniqueStrings(data.RepoDigests),
+			Digest:     data.Digest.String(),
+			Size:       nonNegativeSize(data.Size),
+			CreatedAt:  createdAt,
+		},
+		ParentID:     data.Parent,
+		Architecture: data.Architecture,
+		OS:           data.Os,
+		Labels:       labels,
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func nonNegativeSize(value int64) uint64 {
+	if value < 0 {
+		return 0
+	}
+	return uint64(value)
 }
 
 func convertPorts(ports []networktypes.PortMapping) []domain.PortMapping {

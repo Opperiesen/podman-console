@@ -67,3 +67,26 @@ func TestWrapAndErrorMessageNilAndWrappedErrors(t *testing.T) {
 		t.Fatalf("ErrorMessage() = %q, want %q", got, wrapped.Error())
 	}
 }
+
+func TestWrapClassifiesImageSpecificErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		message  string
+		category domain.ErrorCategory
+	}{
+		{message: "manifest unknown: requested image", category: domain.ErrorRegistry},
+		{message: "image is in use by a container", category: domain.ErrorInUse},
+		{message: "failed to decode message from stream", category: domain.ErrorMalformedStream},
+		{message: "no such image: abc", category: domain.ErrorStaleTarget},
+	}
+	for _, test := range tests {
+		t.Run(test.message, func(t *testing.T) {
+			err := Wrap(domain.ActionImagePull, "image", errors.New(test.message))
+			operation, ok := err.(*domain.OperationError)
+			if !ok || operation.Category != test.category {
+				t.Fatalf("Wrap(%q) = %#v, want category %q", test.message, err, test.category)
+			}
+		})
+	}
+}
