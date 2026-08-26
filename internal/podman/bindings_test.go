@@ -278,3 +278,95 @@ func TestBindingsImageOperationsUseSafeOptionsAndOrderedPullEvents(t *testing.T)
 		t.Fatalf("remove safety query = %#v", removeQuery)
 	}
 }
+
+func TestBindingsRunContainerBuildsMinimalPayloadAndStartsInOrder(t *testing.T) {
+	var paths []string
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/containers/create"):
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode create payload: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"Id":"created-id","Warnings":["using image default network"]}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/containers/created-id/start"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	profile := domain.ConnectionProfile{Name: "test", URI: "tcp://" + strings.TrimPrefix(server.URL, "http://")}
+	client, err := (BindingsFactory{}).Connect(context.Background(), profile)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	result, err := client.RunContainer(context.Background(), domain.ContainerCreateRequest{
+		ImageID: "sha256:image", ImageReference: "quay.io/example/app:latest", Name: "web", Command: []string{"sleep", "60"},
+	})
+	if err != nil {
+		t.Fatalf("RunContainer() error = %v", err)
+	}
+	if result.ContainerID != "created-id" || !result.Started || len(result.Warnings) != 1 {
+		t.Fatalf("RunContainer() result = %#v", result)
+	}
+	if !reflect.DeepEqual(paths, []string{"POST /v6.1.0/libpod/containers/create", "POST /v6.1.0/libpod/containers/created-id/start"}) {
+		t.Fatalf("request order = %#v", paths)
+	}
+	if payload["image"] != "sha256:image" || payload["name"] != "web" {
+		t.Fatalf("create identity payload = %#v", payload)
+	}
+	command, ok := payload["command"].([]any)
+	if !ok || !reflect.DeepEqual(command, []any{"sleep", "60"}) {
+		t.Fatalf("create command payload = %#v", payload["command"])
+	}
+	if payload["terminal"] != false || payload["stdin"] != false {
+		t.Fatalf("interactive payload = %#v", payload)
+	}
+	for _, field := range []string{"env", "mounts", "portmappings", "networks", "privileged", "restart_policy", "pod"} {
+		if _, exists := payload[field]; exists {
+			t.Errorf("unsupported create field %q present in payload: %#v", field, payload[field])
+		}
+	}
+}
+
+func TestBindingsRunContainerReturnsPartialResultWhenStartFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/containers/create") {
+			_, _ = w.Write([]byte(`{"Id":"created-id","Warnings":[]}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/containers/created-id/start") {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte("name is already in use"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	profile := domain.ConnectionProfile{Name: "test", URI: "tcp://" + strings.TrimPrefix(server.URL, "http://")}
+	client, err := (BindingsFactory{}).Connect(context.Background(), profile)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	result, err := client.RunContainer(context.Background(), domain.ContainerCreateRequest{ImageID: "sha256:image", Name: "web"})
+	if result.ContainerID != "created-id" || result.Started || err == nil {
+		t.Fatalf("partial RunContainer() = result:%#v err:%v", result, err)
+	}
+	var operation *domain.OperationError
+	if !errors.As(err, &operation) || operation.Category != domain.ErrorPartial || operation.TargetID != "created-id" {
+		t.Fatalf("partial error = %#v", err)
+	}
+}

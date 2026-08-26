@@ -17,6 +17,7 @@ import (
 	"go.podman.io/podman/v6/pkg/bindings/images"
 	imageTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
 	"go.podman.io/podman/v6/pkg/inspect"
+	"go.podman.io/podman/v6/pkg/specgen"
 )
 
 type BindingsFactory struct{}
@@ -139,6 +140,54 @@ func (c *bindingsClient) Start(ctx context.Context, id string) error {
 	return c.lifecycle(ctx, domain.ActionStart, id, func(opCtx context.Context) error {
 		return containers.Start(opCtx, id, nil)
 	})
+}
+
+func (c *bindingsClient) RunContainer(ctx context.Context, request domain.ContainerCreateRequest) (domain.ContainerRunResult, error) {
+	if err := request.Validate(); err != nil {
+		return domain.ContainerRunResult{}, &domain.OperationError{Category: domain.ErrorInvalidConfig, Action: domain.ActionContainerCreate, TargetID: request.Name, Err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.ContainerRunResult{}, Wrap(domain.ActionContainerCreate, request.Name, err)
+	}
+	opCtx, done := c.operationContext(ctx)
+	defer done()
+
+	spec := specgen.NewSpecGenerator(request.ImageID, false)
+	spec.Name = request.Name
+	if len(request.Command) > 0 {
+		spec.Command = append([]string(nil), request.Command...)
+	}
+	terminal := false
+	stdin := false
+	spec.Terminal = &terminal
+	spec.Stdin = &stdin
+
+	response, err := containers.CreateWithSpec(opCtx, spec, nil)
+	if err != nil {
+		return domain.ContainerRunResult{}, Wrap(domain.ActionContainerCreate, request.Name, err)
+	}
+	result := domain.ContainerRunResult{
+		ContainerID: response.ID,
+		Warnings:    append([]string(nil), response.Warnings...),
+	}
+	if result.ContainerID == "" {
+		return result, &domain.OperationError{
+			Category: domain.ErrorHost, Action: domain.ActionContainerCreate, TargetID: request.Name,
+			Err: errors.New("empty container create response"),
+		}
+	}
+	if err := opCtx.Err(); err != nil {
+		return result, partialContainerError(result.ContainerID, err)
+	}
+	if err := containers.Start(opCtx, result.ContainerID, nil); err != nil {
+		return result, partialContainerError(result.ContainerID, Wrap(domain.ActionStart, result.ContainerID, err))
+	}
+	result.Started = true
+	return result, nil
+}
+
+func partialContainerError(id string, err error) error {
+	return &domain.OperationError{Category: domain.ErrorPartial, Action: domain.ActionStart, TargetID: id, Err: err}
 }
 
 func (c *bindingsClient) Stop(ctx context.Context, id string) error {

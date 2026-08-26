@@ -17,6 +17,7 @@ type Client interface {
 	ListContainers(ctx context.Context) ([]domain.ContainerSummary, error)
 	InspectContainer(ctx context.Context, id string) (domain.ContainerDetails, error)
 	Start(ctx context.Context, id string) error
+	RunContainer(ctx context.Context, request domain.ContainerCreateRequest) (domain.ContainerRunResult, error)
 	Stop(ctx context.Context, id string) error
 	Restart(ctx context.Context, id string) error
 	Remove(ctx context.Context, id string) error

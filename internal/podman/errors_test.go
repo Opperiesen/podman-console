@@ -22,6 +22,7 @@ func TestWrapClassifiesErrors(t *testing.T) {
 		{name: "deadline", err: context.DeadlineExceeded, category: domain.ErrorCancelled},
 		{name: "network error", err: &net.DNSError{Err: "lookup failed", Name: "podman.example.test"}, category: domain.ErrorTransport},
 		{name: "authorization", err: errors.New("remote returned permission denied"), category: domain.ErrorAuthorization},
+		{name: "name conflict", err: errors.New("name is already in use"), category: domain.ErrorNameConflict},
 		{name: "stale target", err: errors.New("no such container: abc"), category: domain.ErrorStaleTarget},
 		{name: "transport marker", err: errors.New("connection refused"), category: domain.ErrorTransport},
 		{name: "host", err: errors.New("podman service returned an unexpected response"), category: domain.ErrorHost},

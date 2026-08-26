@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -75,6 +77,62 @@ type ContainerDetails struct {
 	Labels     map[string]string
 	WorkingDir string
 }
+
+type ContainerCreateRequest struct {
+	ImageID        string
+	ImageReference string
+	Name           string
+	Command        []string
+}
+
+func (r ContainerCreateRequest) Validate() error {
+	if strings.TrimSpace(r.ImageID) == "" {
+		return fmt.Errorf("image ID cannot be empty")
+	}
+	if !containerNamePattern.MatchString(r.Name) {
+		return fmt.Errorf("container name must be 1-63 characters and contain only letters, numbers, '.', '_' or '-'")
+	}
+	for _, argument := range r.Command {
+		if argument == "" || strings.ContainsRune(argument, '\x00') {
+			return fmt.Errorf("container command contains an empty or NUL argument")
+		}
+	}
+	return nil
+}
+
+var containerNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
+
+func ParseContainerCommand(value string) ([]string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	if strings.ContainsAny(value, "|&;<>()$'\"\\`") || strings.ContainsRune(value, '\x00') {
+		return nil, fmt.Errorf("command must contain arguments only; shell operators and quoting are not supported")
+	}
+	return strings.Fields(value), nil
+}
+
+type ContainerRunResult struct {
+	ContainerID string
+	Started     bool
+	Warnings    []string
+}
+
+type ContainerCreateStatus string
+
+const (
+	ContainerCreateIdle       ContainerCreateStatus = "idle"
+	ContainerCreateEditing    ContainerCreateStatus = "editing"
+	ContainerCreateConfirming ContainerCreateStatus = "confirming"
+	ContainerCreateCreating   ContainerCreateStatus = "creating"
+	ContainerCreateStarting   ContainerCreateStatus = "starting"
+	ContainerCreateRefreshing ContainerCreateStatus = "refreshing"
+	ContainerCreateSucceeded  ContainerCreateStatus = "succeeded"
+	ContainerCreatePartial    ContainerCreateStatus = "partial"
+	ContainerCreateFailed     ContainerCreateStatus = "failed"
+	ContainerCreateCancelled  ContainerCreateStatus = "cancelled"
+)
 
 type ContainerStats struct {
 	ContainerID      string

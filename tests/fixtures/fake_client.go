@@ -3,6 +3,7 @@ package fixtures
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/Opperiesen/podman-console/internal/domain"
@@ -42,6 +43,8 @@ type Client struct {
 	Stats        []domain.ContainerStats
 	Errors       map[domain.Action]error
 	StreamErr    error
+	RunResult    domain.ContainerRunResult
+	RunFunc      func(context.Context, domain.ContainerCreateRequest) (domain.ContainerRunResult, error)
 
 	Calls []string
 }
@@ -104,6 +107,64 @@ func (c *Client) lifecycle(ctx context.Context, action domain.Action, id string)
 
 func (c *Client) Start(ctx context.Context, id string) error {
 	return c.lifecycle(ctx, domain.ActionStart, id)
+}
+
+func (c *Client) RunContainer(ctx context.Context, request domain.ContainerCreateRequest) (domain.ContainerRunResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ContainerRunResult{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return domain.ContainerRunResult{}, err
+	}
+	c.mu.Lock()
+	c.Calls = append(c.Calls, fmt.Sprintf("%s:%s:%s", domain.ActionContainerCreate, request.ImageID, request.Name))
+	runFunc := c.RunFunc
+	createErr := c.Errors[domain.ActionContainerCreate]
+	startErr := c.Errors[domain.ActionStart]
+	result := c.RunResult
+	c.mu.Unlock()
+	if runFunc != nil {
+		return runFunc(ctx, request)
+	}
+	if createErr != nil {
+		return domain.ContainerRunResult{}, createErr
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.ContainerRunResult{}, err
+	}
+	if result.ContainerID == "" {
+		result.ContainerID = "created-container"
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Calls = append(c.Calls, string(domain.ActionStart)+":"+result.ContainerID)
+	if startErr != nil {
+		result.Started = false
+		return result, startErr
+	}
+	result.Started = true
+	image := request.ImageReference
+	if image == "" {
+		image = request.ImageID
+	}
+	container := domain.ContainerSummary{ID: result.ContainerID, Name: request.Name, Image: image, State: domain.StateRunning}
+	found := false
+	for _, existing := range c.Containers {
+		if existing.ID == container.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		c.Containers = append(c.Containers, container)
+	}
+	if c.Details == nil {
+		c.Details = map[string]domain.ContainerDetails{}
+	}
+	if _, ok := c.Details[container.ID]; !ok {
+		c.Details[container.ID] = domain.ContainerDetails{ContainerSummary: container, Command: append([]string(nil), request.Command...)}
+	}
+	return result, nil
 }
 
 func (c *Client) Stop(ctx context.Context, id string) error {
