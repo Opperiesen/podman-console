@@ -30,12 +30,18 @@ func (f *Factory) Connect(_ context.Context, profile domain.ConnectionProfile) (
 type Client struct {
 	mu sync.Mutex
 
-	Containers []domain.ContainerSummary
-	Details    map[string]domain.ContainerDetails
-	Logs       []domain.LogLine
-	Stats      []domain.ContainerStats
-	Errors     map[domain.Action]error
-	StreamErr  error
+	Containers   []domain.ContainerSummary
+	Details      map[string]domain.ContainerDetails
+	Images       []domain.ImageSummary
+	ImageDetails map[string]domain.ImageDetails
+	PullEvents   []domain.ImagePullEvent
+	PullErr      error
+	PullWait     <-chan struct{}
+	PullFunc     func(context.Context, string, func(domain.ImagePullEvent)) error
+	Logs         []domain.LogLine
+	Stats        []domain.ContainerStats
+	Errors       map[domain.Action]error
+	StreamErr    error
 
 	Calls []string
 }
@@ -152,4 +158,100 @@ func (c *Client) StreamStats(ctx context.Context, id string, emit func(domain.Co
 	}
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func (c *Client) ListImages(ctx context.Context) ([]domain.ImageSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Calls = append(c.Calls, string(domain.ActionImageList))
+	if err := c.Errors[domain.ActionImageList]; err != nil {
+		return nil, err
+	}
+	return append([]domain.ImageSummary(nil), c.Images...), nil
+}
+
+func (c *Client) InspectImage(ctx context.Context, id string) (domain.ImageDetails, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ImageDetails{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Calls = append(c.Calls, string(domain.ActionImageInspect)+":"+id)
+	if err := c.Errors[domain.ActionImageInspect]; err != nil {
+		return domain.ImageDetails{}, err
+	}
+	details, ok := c.ImageDetails[id]
+	if !ok {
+		return domain.ImageDetails{}, errors.New("no such image")
+	}
+	return details, nil
+}
+
+func (c *Client) PullImage(ctx context.Context, reference string, emit func(domain.ImagePullEvent)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.Calls = append(c.Calls, string(domain.ActionImagePull)+":"+reference)
+	pullEvents := append([]domain.ImagePullEvent(nil), c.PullEvents...)
+	pullErr := c.PullErr
+	pullWait := c.PullWait
+	pullFunc := c.PullFunc
+	configuredErr := c.Errors[domain.ActionImagePull]
+	c.mu.Unlock()
+	if pullFunc != nil {
+		return pullFunc(ctx, reference, emit)
+	}
+	if pullWait != nil {
+		select {
+		case <-pullWait:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	for _, event := range pullEvents {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if event.Reference == "" {
+			event.Reference = reference
+		}
+		if emit != nil {
+			emit(event)
+		}
+	}
+	if configuredErr != nil {
+		return configuredErr
+	}
+	return pullErr
+}
+
+func (c *Client) RemoveImage(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Calls = append(c.Calls, string(domain.ActionImageRemove)+":"+id)
+	if err := c.Errors[domain.ActionImageRemove]; err != nil {
+		return err
+	}
+	index := -1
+	for i := range c.Images {
+		if c.Images[i].ID == id {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return errors.New("no such image")
+	}
+	c.Images = append(c.Images[:index], c.Images[index+1:]...)
+	delete(c.ImageDetails, id)
+	return nil
 }

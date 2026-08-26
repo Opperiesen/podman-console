@@ -39,6 +39,7 @@ visually:
 | Details | Identifiers, image, state, ports, mounts, and networks |
 | Lifecycle | Start, stop, restart, and exact-ID removal with confirmation |
 | Observability | Ordered logs, follow mode, CPU samples, and memory usage |
+| Images | Local image inventory, details, ordered pull progress, and safe exact-target removal |
 | Interface | Keyboard-first TUI built with Bubble Tea and Lip Gloss |
 
 ## Architecture
@@ -84,7 +85,8 @@ ssh://user@example.test/run/user/1000/podman/podman.sock
 ```
 
 For the complete acceptance workflow, including the disposable live-container test, see the
-[MVP quickstart](specs/001-podman-console-mvp/quickstart.md).
+[MVP quickstart](specs/001-podman-console-mvp/quickstart.md) and the
+[image management guide](docs/images.md).
 
 ## Keyboard workflow
 
@@ -97,6 +99,8 @@ For the complete acceptance workflow, including the disposable live-container te
 | `c` | Manage connection profiles |
 | `s` / `x` / `R` / `D` | Start / stop / restart / remove |
 | `l` / `m` | Logs / metrics |
+| `i` | Open local images |
+| `P` | Pull one image reference |
 | `?` | Help |
 
 More interaction details are documented in [keybindings](docs/keybindings.md) and
@@ -129,9 +133,9 @@ Windows on amd64 and arm64.
 
 ## Scope
 
-The current MVP focuses on one active Podman target and its containers. Bulk operations, image
-building, registries, pod orchestration, and multi-host aggregation are intentionally outside the
-current scope.
+The current release focuses on one active Podman target, its containers, and a narrow local-image
+workflow. Bulk operations, image building, pushing, registry administration, pod orchestration,
+and multi-host aggregation are intentionally outside the current scope.
 
 ## Contributing
 

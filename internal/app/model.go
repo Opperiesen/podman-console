@@ -41,6 +41,17 @@ type Model struct {
 	filtering   bool
 	filterInput textinput.Model
 
+	images             []domain.ImageSummary
+	imageSelected      int
+	imageFilter        string
+	imageFiltering     bool
+	imageFilterInput   textinput.Model
+	imageLoading       bool
+	imageDetailLoading bool
+	imageDetails       *domain.ImageDetails
+	imageDetailTarget  string
+	imageFeedback      error
+
 	loading       bool
 	detailLoading bool
 	connected     bool
@@ -52,9 +63,12 @@ type Model struct {
 	generation    uint64
 	requestCancel context.CancelFunc
 
-	pendingAction domain.Action
-	pendingTarget string
-	pendingID     string
+	pendingAction     domain.Action
+	pendingTarget     string
+	pendingID         string
+	pendingResource   string
+	pendingGeneration uint64
+	pendingConnection string
 
 	profileCursor    int
 	profileInputs    []textinput.Model
@@ -70,6 +84,17 @@ type Model struct {
 	logFollow        bool
 	streamStopped    bool
 	stats            *domain.ContainerStats
+
+	imagePullInput         textinput.Model
+	imagePullReference     string
+	imagePullEvents        []domain.ImagePullEvent
+	imagePullStatus        domain.ImageOperationStatus
+	imagePullError         error
+	imagePulling           bool
+	imagePullStreamStopped bool
+	imagePullGeneration    uint64
+	imagePullTarget        string
+	imagePullCancel        context.CancelFunc
 }
 
 func New(store *config.Store, factory podman.Factory) Model {
@@ -79,6 +104,16 @@ func New(store *config.Store, factory podman.Factory) Model {
 	filter.Placeholder = "nom, image ou identifiant"
 	filter.CharLimit = 120
 	filter.SetWidth(36)
+	imageFilter := textinput.New()
+	imageFilter.Prompt = ""
+	imageFilter.Placeholder = "référence, ID ou digest"
+	imageFilter.CharLimit = 256
+	imageFilter.SetWidth(36)
+	pullInput := textinput.New()
+	pullInput.Prompt = ""
+	pullInput.Placeholder = "registry.example/image:tag"
+	pullInput.CharLimit = 256
+	pullInput.SetWidth(64)
 
 	inputs := make([]textinput.Model, 3)
 	placeholders := []string{"nom du profil", "unix:///… ou ssh://…", "chemin vers identity (optionnel)"}
@@ -91,19 +126,22 @@ func New(store *config.Store, factory podman.Factory) Model {
 	}
 
 	return Model{
-		store:         store,
-		factory:       factory,
-		ctx:           ctx,
-		cancel:        cancel,
-		file:          config.Default(),
-		keys:          ui.NewKeyMap(),
-		help:          help.New(),
-		screen:        ui.ScreenInventory,
-		mode:          ui.ModeNormal,
-		filterInput:   filter,
-		profileInputs: inputs,
-		viewport:      viewport.New(viewport.WithWidth(80), viewport.WithHeight(12)),
-		logFollow:     true,
+		store:            store,
+		factory:          factory,
+		ctx:              ctx,
+		cancel:           cancel,
+		file:             config.Default(),
+		keys:             ui.NewKeyMap(),
+		help:             help.New(),
+		screen:           ui.ScreenInventory,
+		mode:             ui.ModeNormal,
+		filterInput:      filter,
+		imageFilterInput: imageFilter,
+		profileInputs:    inputs,
+		viewport:         viewport.New(viewport.WithWidth(80), viewport.WithHeight(12)),
+		logFollow:        true,
+		imagePullInput:   pullInput,
+		imagePullStatus:  domain.ImageOperationIdle,
 	}
 }
 
@@ -124,6 +162,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if message.Generation != m.generation {
 			return m, nil
 		}
+		m.stopImagePull()
 		m.requestCancel = nil
 		m.loading = false
 		m.profile = message.Profile
@@ -136,6 +175,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.containers = message.Containers
 		m.selected = clamp(m.selected, 0, len(m.visibleContainers())-1)
+		m.images = nil
+		m.imageSelected = 0
+		m.imageDetails = nil
+		m.imageDetailTarget = ""
+		m.imageLoading = false
+		m.imageDetailLoading = false
+		m.imageFeedback = nil
 		m.err = nil
 		m.status = fmt.Sprintf("Connecté à %s · %d conteneur(s)", m.profile.DisplayName(), len(m.containers))
 		return m, nil
@@ -168,12 +214,64 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.details = &message.Details
 		m.err = nil
 		return m, nil
+	case ImageInventoryLoadedMsg:
+		if message.Generation != m.generation {
+			return m, nil
+		}
+		m.requestCancel = nil
+		m.imageLoading = false
+		if message.Err != nil {
+			refreshingPull := m.imagePullStatus == domain.ImageOperationRefreshing
+			m.err = friendlyError(message.Err)
+			if refreshingPull {
+				m.imagePullStatus = domain.ImageOperationFailed
+				m.imagePullError = friendlyError(message.Err)
+				m.status = "Le téléchargement est terminé mais l’inventaire n’a pas pu être actualisé."
+			} else {
+				m.status = ""
+			}
+			return m, nil
+		}
+		m.images = message.Images
+		m.imageSelected = clamp(m.imageSelected, 0, len(m.visibleImages())-1)
+		feedback := m.imageFeedback
+		m.imageFeedback = nil
+		m.err = feedback
+		if feedback != nil {
+			m.status = fmt.Sprintf("%s · inventaire actualisé", feedback)
+		} else if m.imagePullStatus == domain.ImageOperationRefreshing {
+			m.imagePullStatus = domain.ImageOperationSucceeded
+			m.imagePulling = false
+			m.screen = ui.ScreenImages
+			m.status = fmt.Sprintf("Téléchargement réussi · inventaire actualisé · %d image(s)", len(m.images))
+		} else if m.imagePullStatus == domain.ImageOperationCancelled {
+			m.status = fmt.Sprintf("Téléchargement annulé · état de l’inventaire vérifié · %d image(s)", len(m.images))
+		} else {
+			m.status = fmt.Sprintf("Inventaire images actualisé · %d image(s)", len(m.images))
+		}
+		return m, nil
+	case ImageDetailsLoadedMsg:
+		if message.Generation != m.generation || message.TargetID != m.imageDetailTarget {
+			return m, nil
+		}
+		m.requestCancel = nil
+		m.imageDetailLoading = false
+		if message.Err != nil {
+			m.err = friendlyError(message.Err)
+			return m, nil
+		}
+		details := mergeImageSummary(message.Details, m.images, message.TargetID)
+		m.imageDetails = &details
+		m.err = nil
+		return m, nil
 	case OperationFinishedMsg:
 		return m.handleOperation(message)
 	case logStreamEvent:
 		return m.handleLogEvent(message)
 	case statsStreamEvent:
 		return m.handleStatsEvent(message)
+	case imagePullStreamEvent:
+		return m.handleImagePullEvent(message)
 	case tea.KeyMsg:
 		return m.handleKey(message)
 	}
@@ -182,35 +280,51 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) View() tea.View {
 	data := ui.ViewData{
-		Width:           m.width,
-		Height:          m.height,
-		Screen:          m.screen,
-		Mode:            m.mode,
-		Profile:         m.profile,
-		Connected:       m.connected,
-		Profiles:        m.file.Profiles,
-		ActiveProfile:   m.file.Active,
-		ProfileCursor:   m.profileCursor,
-		ProfileFields:   m.profileFieldValues(),
-		ProfileFocus:    m.profileFocus,
-		Containers:      m.visibleContainers(),
-		Selected:        m.selected,
-		Filter:          m.filter,
-		FilterEditing:   m.filtering,
-		Loading:         m.loading || m.detailLoading,
-		Error:           m.err,
-		Status:          m.status,
-		Details:         m.details,
-		LogContent:      m.viewport.View(),
-		LogFollow:       m.logFollow,
-		StreamStopped:   m.streamStopped,
-		Stats:           m.stats,
-		ConfirmAction:   actionLabel(m.pendingAction),
-		ConfirmTarget:   m.pendingTarget,
-		ConfirmTargetID: m.pendingID,
-		FormError:       m.profileFormError,
-		Help:            m.help,
-		Keys:            m.keys,
+		Width:                 m.width,
+		Height:                m.height,
+		Screen:                m.screen,
+		Mode:                  m.mode,
+		Profile:               m.profile,
+		Connected:             m.connected,
+		Profiles:              m.file.Profiles,
+		ActiveProfile:         m.file.Active,
+		ProfileCursor:         m.profileCursor,
+		ProfileFields:         m.profileFieldValues(),
+		ProfileFocus:          m.profileFocus,
+		Containers:            m.visibleContainers(),
+		Selected:              m.selected,
+		Filter:                m.filter,
+		FilterEditing:         m.filtering,
+		Loading:               m.loading || m.detailLoading,
+		Images:                m.visibleImages(),
+		ImageSelected:         m.imageSelected,
+		ImageFilter:           m.imageFilter,
+		ImageFilterEditing:    m.imageFiltering,
+		ImageLoading:          m.imageLoading,
+		ImageDetailLoading:    m.imageDetailLoading,
+		ImageDetails:          m.imageDetails,
+		ImagePullReference:    m.imagePullReference,
+		ImagePullInput:        m.imagePullInput.Value(),
+		ImagePullInputEditing: m.screen == ui.ScreenImagePull && !m.imagePulling,
+		ImagePullEvents:       append([]domain.ImagePullEvent(nil), m.imagePullEvents...),
+		ImagePullStatus:       m.imagePullStatus,
+		ImagePullError:        m.imagePullError,
+		ImagePulling:          m.imagePulling,
+		ImagePullStopped:      m.imagePullStreamStopped,
+		Error:                 m.err,
+		Status:                m.status,
+		Details:               m.details,
+		LogContent:            m.viewport.View(),
+		LogFollow:             m.logFollow,
+		StreamStopped:         m.streamStopped,
+		Stats:                 m.stats,
+		ConfirmAction:         actionLabel(m.pendingAction),
+		ConfirmTarget:         m.pendingTarget,
+		ConfirmTargetID:       m.pendingID,
+		ConfirmResource:       m.pendingResource,
+		FormError:             m.profileFormError,
+		Help:                  m.help,
+		Keys:                  m.keys,
 	}
 	v := tea.NewView(ui.Render(data))
 	v.AltScreen = true
@@ -241,15 +355,29 @@ func (m *Model) handleOperation(message OperationFinishedMsg) (tea.Model, tea.Cm
 	m.requestCancel = nil
 	m.loading = false
 	if message.Err != nil {
-		m.err = friendlyError(message.Err)
+		m.err = friendlyOperationError(message.Action, message.Err)
 		m.status = ""
 		if isStaleTarget(message.Err) {
+			if message.Action == domain.ActionImageRemove {
+				m.imageFeedback = m.err
+				m.screen = ui.ScreenImages
+				m.imageDetails = nil
+				m.imageDetailTarget = ""
+				return m, m.refreshImages()
+			}
 			return m, m.refresh()
 		}
 		return m, nil
 	}
 	m.err = nil
 	m.status = fmt.Sprintf("%s réussi pour %s · actualisation…", actionLabel(message.Action), shortTarget(message.TargetID))
+	if message.Action == domain.ActionImageRemove {
+		m.screen = ui.ScreenImages
+		m.imageDetails = nil
+		m.imageDetailTarget = ""
+		m.imageFeedback = nil
+		return m, m.refreshImages()
+	}
 	if message.Action == domain.ActionRemove {
 		m.screen = ui.ScreenInventory
 		m.details = nil
@@ -266,14 +394,20 @@ func (m *Model) handleOperation(message OperationFinishedMsg) (tea.Model, tea.Cm
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.mode == ui.ModeConfirm {
 		if key.Matches(msg, m.keys.Confirm) {
+			if m.pendingConnection != "" && (m.pendingGeneration != m.generation || m.pendingConnection != m.connectionIdentity()) {
+				m.mode = ui.ModeNormal
+				m.resetPendingConfirmation()
+				m.err = errors.New("la cible de confirmation n’est plus active")
+				return m, nil
+			}
 			action, id := m.pendingAction, m.pendingID
 			m.mode = ui.ModeNormal
-			m.pendingAction, m.pendingID, m.pendingTarget = "", "", ""
+			m.resetPendingConfirmation()
 			return m, m.runOperation(action, id)
 		}
 		if key.Matches(msg, m.keys.Cancel) {
 			m.mode = ui.ModeNormal
-			m.pendingAction, m.pendingID, m.pendingTarget = "", "", ""
+			m.resetPendingConfirmation()
 			m.status = "Opération annulée ; la cible n’a pas été modifiée."
 			return m, nil
 		}
@@ -300,6 +434,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter = updated.Value()
 		m.selected = clamp(m.selected, 0, len(m.visibleContainers())-1)
 		return m, cmd
+	}
+	if m.imageFiltering {
+		if msg.String() == "esc" {
+			m.imageFiltering = false
+			m.imageFilterInput.Blur()
+			return m, nil
+		}
+		if msg.String() == "enter" {
+			m.imageFiltering = false
+			m.imageFilterInput.Blur()
+			m.imageFilter = m.imageFilterInput.Value()
+			m.imageSelected = 0
+			return m, nil
+		}
+		updated, cmd := m.imageFilterInput.Update(msg)
+		m.imageFilterInput = updated
+		m.imageFilter = updated.Value()
+		m.imageSelected = clamp(m.imageSelected, 0, len(m.visibleImages())-1)
+		return m, cmd
+	}
+	if m.screen == ui.ScreenImagePull {
+		return m.handleImagePullKey(msg)
 	}
 	if m.mode == ui.ModeProfiles {
 		return m.handleProfilesKey(msg)
@@ -337,7 +493,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.profileCursor = indexOfProfile(m.file.Profiles, m.file.Active)
 		return m, nil
 	}
+	if key.Matches(msg, m.keys.Images) {
+		return m, m.openImages()
+	}
 	if key.Matches(msg, m.keys.Refresh) {
+		if m.screen == ui.ScreenImages {
+			return m, m.refreshImages()
+		}
+		if m.screen == ui.ScreenImageDetails && m.imageDetails != nil && m.client != nil {
+			ctx, generation := m.beginRequest()
+			m.imageDetailLoading = true
+			return m, inspectImageCmd(ctx, m.client, m.imageDetails.ID, generation)
+		}
 		if m.screen == ui.ScreenDetails && m.details != nil && m.client != nil {
 			ctx, generation := m.beginRequest()
 			m.detailLoading = true
@@ -346,42 +513,80 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 	}
 	if key.Matches(msg, m.keys.Filter) {
+		if m.screen == ui.ScreenImages {
+			m.imageFiltering = true
+			m.imageFilterInput.SetValue(m.imageFilter)
+			return m, m.imageFilterInput.Focus()
+		}
 		m.filtering = true
 		m.filterInput.SetValue(m.filter)
 		return m, m.filterInput.Focus()
 	}
 	if key.Matches(msg, m.keys.Up) {
+		if m.screen == ui.ScreenImages {
+			m.imageSelected = clamp(m.imageSelected-1, 0, len(m.visibleImages())-1)
+			return m, nil
+		}
+		if m.screen != ui.ScreenInventory && m.screen != ui.ScreenDetails {
+			return m, nil
+		}
 		m.selected = clamp(m.selected-1, 0, len(m.visibleContainers())-1)
 		return m, nil
 	}
 	if key.Matches(msg, m.keys.Down) {
+		if m.screen == ui.ScreenImages {
+			m.imageSelected = clamp(m.imageSelected+1, 0, len(m.visibleImages())-1)
+			return m, nil
+		}
+		if m.screen != ui.ScreenInventory && m.screen != ui.ScreenDetails {
+			return m, nil
+		}
 		m.selected = clamp(m.selected+1, 0, len(m.visibleContainers())-1)
 		return m, nil
 	}
 	if key.Matches(msg, m.keys.Open) && m.screen == ui.ScreenInventory {
 		return m, m.openDetails()
 	}
-	if key.Matches(msg, m.keys.Start) {
+	if key.Matches(msg, m.keys.Open) && m.screen == ui.ScreenImages {
+		return m, m.openImageDetails()
+	}
+	if key.Matches(msg, m.keys.Pull) && (m.screen == ui.ScreenImages || m.screen == ui.ScreenImageDetails) {
+		return m, m.openImagePull()
+	}
+	if key.Matches(msg, m.keys.Start) && (m.screen == ui.ScreenInventory || m.screen == ui.ScreenDetails) {
 		return m, m.runOperation(domain.ActionStart, m.selectedID())
 	}
-	if key.Matches(msg, m.keys.Stop) {
+	if key.Matches(msg, m.keys.Stop) && (m.screen == ui.ScreenInventory || m.screen == ui.ScreenDetails) {
 		return m, m.requestConfirmation(domain.ActionStop)
 	}
-	if key.Matches(msg, m.keys.Restart) {
+	if key.Matches(msg, m.keys.Restart) && (m.screen == ui.ScreenInventory || m.screen == ui.ScreenDetails) {
 		return m, m.requestConfirmation(domain.ActionRestart)
 	}
 	if key.Matches(msg, m.keys.Remove) {
+		if m.screen == ui.ScreenImages || m.screen == ui.ScreenImageDetails {
+			return m, m.requestImageConfirmation()
+		}
 		return m, m.requestConfirmation(domain.ActionRemove)
 	}
-	if key.Matches(msg, m.keys.Logs) {
+	if key.Matches(msg, m.keys.Logs) && (m.screen == ui.ScreenInventory || m.screen == ui.ScreenDetails) {
 		return m, m.openLogs()
 	}
-	if key.Matches(msg, m.keys.Stats) {
+	if key.Matches(msg, m.keys.Stats) && (m.screen == ui.ScreenInventory || m.screen == ui.ScreenDetails) {
 		return m, m.openStats()
 	}
 	if key.Matches(msg, m.keys.Back) && m.screen == ui.ScreenDetails {
 		m.screen = ui.ScreenInventory
 		m.details = nil
+		return m, nil
+	}
+	if key.Matches(msg, m.keys.Back) && m.screen == ui.ScreenImageDetails {
+		m.screen = ui.ScreenImages
+		m.imageDetails = nil
+		m.imageDetailTarget = ""
+		return m, nil
+	}
+	if key.Matches(msg, m.keys.Back) && m.screen == ui.ScreenImages {
+		m.screen = ui.ScreenInventory
 		return m, nil
 	}
 	return m, nil
@@ -529,6 +734,7 @@ func (m *Model) removeProfile() tea.Cmd {
 
 func (m *Model) beginProfile(profile domain.ConnectionProfile) tea.Cmd {
 	m.stopStream()
+	m.stopImagePull()
 	m.profile = profile
 	m.file.Active = profile.Name
 	_ = m.saveConfig()
@@ -537,6 +743,14 @@ func (m *Model) beginProfile(profile domain.ConnectionProfile) tea.Cmd {
 	m.screen = ui.ScreenInventory
 	m.mode = ui.ModeNormal
 	m.details = nil
+	m.images = nil
+	m.imageSelected = 0
+	m.imageDetails = nil
+	m.imageDetailTarget = ""
+	m.imageLoading = false
+	m.imageDetailLoading = false
+	m.imagePullStatus = domain.ImageOperationIdle
+	m.imagePullError = nil
 	m.err = nil
 	m.loading = true
 	m.status = "Connexion à " + profile.DisplayName() + "…"
@@ -555,6 +769,190 @@ func (m *Model) refresh() tea.Cmd {
 	return listContainersCmd(ctx, m.client, generation)
 }
 
+func (m *Model) openImages() tea.Cmd {
+	m.screen = ui.ScreenImages
+	m.imageDetails = nil
+	m.imageDetailTarget = ""
+	m.imageFiltering = false
+	m.imageFeedback = nil
+	m.err = nil
+	if m.client == nil {
+		m.err = fmt.Errorf("aucune cible Podman connectée")
+		return nil
+	}
+	return m.refreshImages()
+}
+
+func (m *Model) refreshImages() tea.Cmd {
+	if m.client == nil {
+		m.err = fmt.Errorf("aucune cible Podman connectée")
+		return nil
+	}
+	ctx, generation := m.beginRequest()
+	m.imageLoading = true
+	if m.imagePullStatus != domain.ImageOperationRefreshing && m.imagePullStatus != domain.ImageOperationCancelled {
+		m.status = "Actualisation de l’inventaire images…"
+	}
+	return listImagesCmd(ctx, m.client, generation)
+}
+
+func (m *Model) openImageDetails() tea.Cmd {
+	image, ok := m.selectedImage()
+	if !ok || image.ID == "" || m.client == nil {
+		m.err = fmt.Errorf("aucune image sélectionnée")
+		return nil
+	}
+	m.screen = ui.ScreenImageDetails
+	m.imageDetails = nil
+	m.imageDetailTarget = image.ID
+	m.imageDetailLoading = true
+	m.err = nil
+	ctx, generation := m.beginRequest()
+	return inspectImageCmd(ctx, m.client, image.ID, generation)
+}
+
+func (m *Model) openImagePull() tea.Cmd {
+	if m.client == nil {
+		m.err = fmt.Errorf("aucune cible Podman connectée")
+		return nil
+	}
+	m.screen = ui.ScreenImagePull
+	m.imagePullInput.SetValue(m.imagePullReference)
+	m.imagePullError = nil
+	m.err = nil
+	return m.imagePullInput.Focus()
+}
+
+func (m *Model) handleImagePullKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, m.keys.Quit) {
+		m.cancel()
+		m.stopStream()
+		m.stopImagePull()
+		return m, tea.Quit
+	}
+	if key.Matches(msg, m.keys.Help) {
+		m.help.ShowAll = !m.help.ShowAll
+		return m, nil
+	}
+	if m.imagePulling {
+		if msg.String() == "esc" {
+			return m, m.cancelImagePull()
+		}
+		return m, nil
+	}
+	if msg.String() == "esc" {
+		m.imagePullInput.Blur()
+		m.screen = ui.ScreenImages
+		return m, nil
+	}
+	if key.Matches(msg, m.keys.Confirm) {
+		return m, m.startImagePull()
+	}
+	updated, cmd := m.imagePullInput.Update(msg)
+	m.imagePullInput = updated
+	m.imagePullReference = updated.Value()
+	m.imagePullError = nil
+	return m, cmd
+}
+
+func (m *Model) startImagePull() tea.Cmd {
+	reference := strings.TrimSpace(m.imagePullInput.Value())
+	if reference == "" {
+		m.imagePullError = errors.New("la référence d’image ne peut pas être vide")
+		return nil
+	}
+	if m.client == nil {
+		m.imagePullError = errors.New("aucune cible Podman connectée")
+		return nil
+	}
+	m.imagePullReference = reference
+	m.imagePullInput.SetValue(reference)
+	m.imagePullInput.Blur()
+	m.stopImagePull()
+	m.imagePullGeneration++
+	generation := m.imagePullGeneration
+	target := m.connectionIdentity()
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.imagePullCancel = cancel
+	m.imagePullTarget = target
+	m.imagePullEvents = nil
+	m.imagePullStatus = domain.ImageOperationRunning
+	m.imagePullError = nil
+	m.imagePulling = true
+	m.imagePullStreamStopped = false
+	m.err = nil
+	m.status = fmt.Sprintf("Téléchargement de %s…", reference)
+	return startImagePullCmd(ctx, m.client, reference, target, generation)
+}
+
+func (m *Model) cancelImagePull() tea.Cmd {
+	if !m.imagePulling {
+		return nil
+	}
+	m.stopImagePull()
+	m.imagePulling = false
+	m.imagePullStreamStopped = true
+	m.imagePullStatus = domain.ImageOperationCancelled
+	m.imagePullError = nil
+	m.status = "Téléchargement annulé · vérification de l’inventaire…"
+	return m.refreshImages()
+}
+
+func (m *Model) stopImagePull() {
+	m.imagePullGeneration++
+	if m.imagePullCancel != nil {
+		m.imagePullCancel()
+		m.imagePullCancel = nil
+	}
+	m.imagePulling = false
+}
+
+func (m *Model) handleImagePullEvent(event imagePullStreamEvent) (tea.Model, tea.Cmd) {
+	if event.Generation != m.imagePullGeneration || event.Target != m.imagePullTarget {
+		return m, nil
+	}
+	if event.Event != nil {
+		observation := *event.Event
+		m.imagePullEvents = append(m.imagePullEvents, observation)
+		switch observation.Kind {
+		case domain.ImagePullError:
+			m.imagePullStatus = domain.ImageOperationFailed
+			if strings.TrimSpace(observation.Text) != "" {
+				m.imagePullError = errors.New(observation.Text)
+			}
+		case domain.ImagePullCancelled:
+			m.imagePullStatus = domain.ImageOperationCancelled
+		}
+	}
+	if event.Done {
+		m.imagePulling = false
+		m.imagePullStreamStopped = true
+		m.imagePullCancel = nil
+		if event.Err != nil {
+			if errors.Is(event.Err, context.Canceled) || errors.Is(event.Err, context.DeadlineExceeded) {
+				m.imagePullStatus = domain.ImageOperationCancelled
+				m.imagePullError = nil
+				m.status = "Téléchargement annulé · l’inventaire reste à vérifier."
+				return m, nil
+			}
+			m.imagePullStatus = domain.ImageOperationFailed
+			m.imagePullError = friendlyImagePullError(event.Err)
+			m.status = "Le téléchargement a échoué ; la progression reçue est conservée."
+			return m, nil
+		}
+		if m.imagePullStatus == domain.ImageOperationFailed || m.imagePullStatus == domain.ImageOperationCancelled {
+			return m, nil
+		}
+		m.imagePullStatus = domain.ImageOperationRefreshing
+		m.status = "Téléchargement terminé · actualisation de l’inventaire…"
+		return m, m.refreshImages()
+	}
+	if event.Next != nil {
+		return m, waitImagePullStream(event.Next, event.Target, event.Generation)
+	}
+	return m, nil
+}
+
 func (m *Model) beginRequest() (context.Context, uint64) {
 	if m.requestCancel != nil {
 		m.requestCancel()
@@ -567,7 +965,7 @@ func (m *Model) beginRequest() (context.Context, uint64) {
 
 func (m *Model) runOperation(action domain.Action, id string) tea.Cmd {
 	if id == "" {
-		m.err = fmt.Errorf("aucun conteneur sélectionné")
+		m.err = fmt.Errorf("aucune cible sélectionnée")
 		return nil
 	}
 	if m.client == nil {
@@ -590,9 +988,46 @@ func (m *Model) requestConfirmation(action domain.Action) tea.Cmd {
 	m.pendingAction = action
 	m.pendingID = id
 	m.pendingTarget = m.selectedName()
+	m.pendingResource = "conteneur"
+	m.pendingGeneration = m.generation
+	m.pendingConnection = m.connectionIdentity()
 	m.mode = ui.ModeConfirm
 	m.err = nil
 	return nil
+}
+
+func (m *Model) requestImageConfirmation() tea.Cmd {
+	image, ok := m.selectedImage()
+	if m.screen == ui.ScreenImageDetails && m.imageDetails != nil {
+		image = m.imageDetails.ImageSummary
+		ok = image.ID != ""
+	}
+	if !ok || image.ID == "" {
+		m.err = fmt.Errorf("aucune image sélectionnée")
+		return nil
+	}
+	m.pendingAction = domain.ActionImageRemove
+	m.pendingID = image.ID
+	m.pendingTarget = imageTargetName(image)
+	m.pendingResource = "image"
+	m.pendingGeneration = m.generation
+	m.pendingConnection = m.connectionIdentity()
+	m.mode = ui.ModeConfirm
+	m.err = nil
+	return nil
+}
+
+func (m *Model) resetPendingConfirmation() {
+	m.pendingAction = ""
+	m.pendingTarget = ""
+	m.pendingID = ""
+	m.pendingResource = ""
+	m.pendingGeneration = 0
+	m.pendingConnection = ""
+}
+
+func (m *Model) connectionIdentity() string {
+	return strings.Join([]string{m.profile.Name, m.profile.URI, m.profile.IdentityPath}, "\x00")
 }
 
 func (m *Model) openDetails() tea.Cmd {
@@ -744,6 +1179,25 @@ func (m *Model) visibleContainers() []domain.ContainerSummary {
 	return result
 }
 
+func (m *Model) visibleImages() []domain.ImageSummary {
+	query := strings.ToLower(strings.TrimSpace(m.imageFilter))
+	if query == "" {
+		return append([]domain.ImageSummary(nil), m.images...)
+	}
+	result := make([]domain.ImageSummary, 0, len(m.images))
+	for _, image := range m.images {
+		fields := append([]string{image.ID, image.Digest}, image.References...)
+		fields = append(fields, image.Digests...)
+		for _, field := range fields {
+			if strings.Contains(strings.ToLower(field), query) {
+				result = append(result, image)
+				break
+			}
+		}
+	}
+	return result
+}
+
 func (m *Model) selectedContainer() (domain.ContainerSummary, bool) {
 	containers := m.visibleContainers()
 	if m.selected < 0 || m.selected >= len(containers) {
@@ -752,7 +1206,25 @@ func (m *Model) selectedContainer() (domain.ContainerSummary, bool) {
 	return containers[m.selected], true
 }
 
+func (m *Model) selectedImage() (domain.ImageSummary, bool) {
+	images := m.visibleImages()
+	if m.imageSelected < 0 || m.imageSelected >= len(images) {
+		return domain.ImageSummary{}, false
+	}
+	return images[m.imageSelected], true
+}
+
 func (m *Model) selectedID() string {
+	if m.screen == ui.ScreenImageDetails && m.imageDetails != nil {
+		return m.imageDetails.ID
+	}
+	if m.screen == ui.ScreenImages || m.screen == ui.ScreenImageDetails {
+		image, ok := m.selectedImage()
+		if !ok {
+			return ""
+		}
+		return image.ID
+	}
 	if m.screen == ui.ScreenDetails && m.details != nil {
 		return m.details.ID
 	}
@@ -764,6 +1236,16 @@ func (m *Model) selectedID() string {
 }
 
 func (m *Model) selectedName() string {
+	if m.screen == ui.ScreenImageDetails && m.imageDetails != nil {
+		return imageTargetName(m.imageDetails.ImageSummary)
+	}
+	if m.screen == ui.ScreenImages || m.screen == ui.ScreenImageDetails {
+		image, ok := m.selectedImage()
+		if !ok {
+			return "image inconnue"
+		}
+		return imageTargetName(image)
+	}
 	if m.screen == ui.ScreenDetails && m.details != nil && m.details.Name != "" {
 		return m.details.Name
 	}
@@ -775,6 +1257,26 @@ func (m *Model) selectedName() string {
 		return container.Name
 	}
 	return shortTarget(container.ID)
+}
+
+func imageTargetName(image domain.ImageSummary) string {
+	if reference := image.PrimaryReference(); reference != "" {
+		return reference
+	}
+	if image.ID != "" {
+		return shortTarget(image.ID)
+	}
+	return "image inconnue"
+}
+
+func mergeImageSummary(details domain.ImageDetails, images []domain.ImageSummary, target string) domain.ImageDetails {
+	for _, image := range images {
+		if image.ID == target {
+			details.Containers = image.Containers
+			break
+		}
+	}
+	return details
 }
 
 func formatLogs(lines []domain.LogLine) string {
@@ -803,6 +1305,12 @@ func friendlyError(err error) error {
 			prefix = "Cible injoignable"
 		case domain.ErrorStaleTarget:
 			prefix = "Cible obsolète"
+		case domain.ErrorRegistry:
+			prefix = "Registre indisponible ou référence refusée"
+		case domain.ErrorInUse:
+			prefix = "Image utilisée par un conteneur"
+		case domain.ErrorMalformedStream:
+			prefix = "Flux Podman invalide"
 		case domain.ErrorCancelled:
 			prefix = "Opération annulée"
 		default:
@@ -813,13 +1321,58 @@ func friendlyError(err error) error {
 	return err
 }
 
+func friendlyImagePullError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var operation *domain.OperationError
+	if errors.As(err, &operation) {
+		return friendlyError(err)
+	}
+	message := strings.ToLower(err.Error())
+	var prefix string
+	switch {
+	case strings.Contains(message, "manifest unknown"), strings.Contains(message, "name unknown"), strings.Contains(message, "repository does not exist"), strings.Contains(message, "rate limit"):
+		prefix = "Registre indisponible ou référence refusée"
+	case strings.Contains(message, "unauthorized"), strings.Contains(message, "permission denied"), strings.Contains(message, "authentication"):
+		prefix = "Autorisation refusée"
+	case strings.Contains(message, "failed to decode"), strings.Contains(message, "unexpected input"):
+		prefix = "Flux Podman invalide"
+	default:
+		return err
+	}
+	return fmt.Errorf("%s : %s", prefix, err)
+}
+
+func friendlyOperationError(action domain.Action, err error) error {
+	if action == domain.ActionImageRemove {
+		if err == nil {
+			return nil
+		}
+		var operation *domain.OperationError
+		if errors.As(err, &operation) {
+			return friendlyError(err)
+		}
+		message := strings.ToLower(err.Error())
+		switch {
+		case strings.Contains(message, "in use"), strings.Contains(message, "being used"), strings.Contains(message, "used by"):
+			return fmt.Errorf("Image utilisée par un conteneur : %s", err)
+		case strings.Contains(message, "no such image"), strings.Contains(message, "image not found"):
+			return fmt.Errorf("Cible obsolète : %s", err)
+		case strings.Contains(message, "permission denied"), strings.Contains(message, "unauthorized"), strings.Contains(message, "forbidden"), strings.Contains(message, "authentication"):
+			return fmt.Errorf("Autorisation refusée : %s", err)
+		}
+	}
+	return friendlyError(err)
+}
+
 func isStaleTarget(err error) bool {
 	var operation *domain.OperationError
 	if errors.As(err, &operation) {
 		return operation.Category == domain.ErrorStaleTarget
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "no such container") || strings.Contains(message, "container not found")
+	return strings.Contains(message, "no such container") || strings.Contains(message, "container not found") || strings.Contains(message, "no such image") || strings.Contains(message, "image not found")
 }
 
 func actionLabel(action domain.Action) string {
@@ -831,6 +1384,8 @@ func actionLabel(action domain.Action) string {
 	case domain.ActionRestart:
 		return "Redémarrage"
 	case domain.ActionRemove:
+		return "Suppression"
+	case domain.ActionImageRemove:
 		return "Suppression"
 	default:
 		return string(action)

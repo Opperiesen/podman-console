@@ -32,7 +32,22 @@ func classify(err error) domain.ErrorCategory {
 			return domain.ErrorAuthorization
 		}
 	}
-	for _, marker := range []string{"no such container", "container not found", "does not exist", "not found"} {
+	for _, marker := range []string{"image is in use", "image in use", "being used by", "used by container", "image used"} {
+		if strings.Contains(message, marker) {
+			return domain.ErrorInUse
+		}
+	}
+	for _, marker := range []string{"manifest unknown", "name unknown", "repository does not exist", "pull access denied", "requested access to the resource is denied", "toomanyrequests", "rate limit"} {
+		if strings.Contains(message, marker) {
+			return domain.ErrorRegistry
+		}
+	}
+	for _, marker := range []string{"malformed pull stream", "failed to decode message from stream", "unexpected input"} {
+		if strings.Contains(message, marker) {
+			return domain.ErrorMalformedStream
+		}
+	}
+	for _, marker := range []string{"no such container", "container not found", "no such image", "image not found", "does not exist", "not found"} {
 		if strings.Contains(message, marker) {
 			return domain.ErrorStaleTarget
 		}

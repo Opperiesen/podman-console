@@ -22,6 +22,10 @@ type Client interface {
 	Remove(ctx context.Context, id string) error
 	StreamLogs(ctx context.Context, id string, options LogOptions, emit func(domain.LogLine)) error
 	StreamStats(ctx context.Context, id string, emit func(domain.ContainerStats)) error
+	ListImages(ctx context.Context) ([]domain.ImageSummary, error)
+	InspectImage(ctx context.Context, id string) (domain.ImageDetails, error)
+	PullImage(ctx context.Context, reference string, emit func(domain.ImagePullEvent)) error
+	RemoveImage(ctx context.Context, id string) error
 }
 
 type Factory interface {

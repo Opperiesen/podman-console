@@ -2,6 +2,7 @@ package podman
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,11 @@ import (
 	"time"
 
 	"github.com/Opperiesen/podman-console/internal/domain"
+	"github.com/opencontainers/go-digest"
 	networktypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/libpod/define"
+	imageTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
+	"go.podman.io/podman/v6/pkg/inspect"
 )
 
 func TestBindingsFactoryConnectRejectsInvalidProfileWithoutHostAccess(t *testing.T) {
@@ -103,7 +107,7 @@ func TestBindingsLifecycleMapsSuccessAndStaleErrors(t *testing.T) {
 	var paths []string
 	status := http.StatusOK
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/_ping" {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -173,5 +177,104 @@ func TestConsumeLogStreamReturnsWhenProducerCompletesWithoutClosingChannels(t *t
 	}
 	if len(lines) != 1 || lines[0].Text != "first line" || lines[0].Stream != "stdout" {
 		t.Fatalf("unexpected log lines: %#v", lines)
+	}
+}
+
+func TestConvertImagesPreservesReferencesDigestsAndInspectMetadata(t *testing.T) {
+	created := time.Unix(1_700_000_000, 0)
+	row := &imageTypes.ImageSummary{
+		ID: "sha256:image", RepoTags: []string{"repo/app:latest", "repo/app:latest"},
+		RepoDigests: []string{"repo/app@sha256:abc"}, Names: []string{"repo/app:latest", "repo/app:stable"},
+		Created: created.Unix(), Size: 2048, Containers: 3, Dangling: true,
+	}
+	summary := convertImageSummary(row)
+	if !reflect.DeepEqual(summary.References, []string{"repo/app:latest", "repo/app:stable"}) {
+		t.Fatalf("references = %#v", summary.References)
+	}
+	if summary.Size != 2048 || summary.Containers != 3 || !summary.Dangling || !summary.CreatedAt.Equal(created) {
+		t.Fatalf("summary = %#v", summary)
+	}
+
+	digestValue := digest.Digest("sha256:inspect")
+	details := convertImageDetails(&inspect.ImageData{
+		ID: "sha256:image", Digest: digestValue, RepoTags: []string{"repo/app:latest"},
+		RepoDigests: []string{"repo/app@sha256:abc"}, Created: &created, Size: 4096,
+		Parent: "sha256:parent", Architecture: "arm64", Os: "linux", Labels: map[string]string{"role": "web"},
+	})
+	if details.ID != "sha256:image" || details.ParentID != "sha256:parent" || details.Architecture != "arm64" || details.OS != "linux" || details.Labels["role"] != "web" {
+		t.Fatalf("details = %#v", details)
+	}
+	if details.Digest != "sha256:inspect" || details.Size != 4096 {
+		t.Fatalf("inspect identity = %#v", details.ImageSummary)
+	}
+}
+
+func TestBindingsImageOperationsUseSafeOptionsAndOrderedPullEvents(t *testing.T) {
+	var pullReference string
+	var pullProgress []string
+	var removeQuery map[string][]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/_ping") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/images/json"):
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"Id": "sha256:image", "RepoTags": []string{"repo/app:latest"}, "RepoDigests": []string{"repo/app@sha256:abc"},
+				"Created": int64(1_700_000_000), "Size": int64(2048), "Containers": 2,
+			}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/images/sha256:image/json"):
+			_, _ = w.Write([]byte(`{"Id":"sha256:image","RepoTags":["repo/app:latest"],"RepoDigests":["repo/app@sha256:abc"],"Created":"2023-11-14T22:13:20Z","Size":2048,"Architecture":"arm64","Os":"linux","Labels":{"role":"web"}}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/images/pull"):
+			pullReference = r.URL.Query().Get("reference")
+			if r.URL.Query().Get("alltags") != "false" || r.URL.Query().Get("quiet") != "false" {
+				t.Errorf("pull safety query = %v", r.URL.Query())
+			}
+			_, _ = w.Write([]byte(`{"stream":"layer-a\n"}
+{"stream":"layer-b\n"}
+{"images":["sha256:pulled"]}
+`))
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/images/remove"):
+			removeQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{"Deleted":["sha256:image"],"Untagged":[],"Errors":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	profile := domain.ConnectionProfile{Name: "test", URI: "tcp://" + strings.TrimPrefix(server.URL, "http://")}
+	client, err := (BindingsFactory{}).Connect(context.Background(), profile)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	images, err := client.ListImages(context.Background())
+	if err != nil || len(images) != 1 || images[0].PrimaryReference() != "repo/app:latest" {
+		t.Fatalf("ListImages() = %#v, %v", images, err)
+	}
+	details, err := client.InspectImage(context.Background(), "sha256:image")
+	if err != nil || details.Architecture != "arm64" || details.Labels["role"] != "web" {
+		t.Fatalf("InspectImage() = %#v, %v", details, err)
+	}
+	var events []domain.ImagePullEvent
+	err = client.PullImage(context.Background(), "quay.io/example/app:latest", func(event domain.ImagePullEvent) {
+		events = append(events, event)
+		if event.Kind == domain.ImagePullProgress {
+			pullProgress = append(pullProgress, event.Text)
+		}
+	})
+	if err != nil || pullReference != "quay.io/example/app:latest" || strings.Join(pullProgress, "") != "layer-a\nlayer-b\n" {
+		t.Fatalf("PullImage() = events:%#v err:%v reference:%q progress:%q", events, err, pullReference, pullProgress)
+	}
+	if len(events) != 3 || events[2].Kind != domain.ImagePullSuccess || len(events[2].ImageIDs) != 1 {
+		t.Fatalf("pull events = %#v", events)
+	}
+	if err := client.RemoveImage(context.Background(), "sha256:image"); err != nil {
+		t.Fatalf("RemoveImage() error = %v", err)
+	}
+	if removeQuery["images"][0] != "sha256:image" || removeQuery["all"][0] != "false" || removeQuery["force"][0] != "false" || removeQuery["ignore"][0] != "false" || removeQuery["lookupmanifest"][0] != "false" || removeQuery["noprune"][0] != "true" {
+		t.Fatalf("remove safety query = %#v", removeQuery)
 	}
 }

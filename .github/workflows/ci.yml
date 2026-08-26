@@ -25,7 +25,7 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
       - name: Verify release version metadata
-        run: test "$(go run ./cmd/podman-console --version)" = "podman-console 0.1.0"
+        run: test "$(go run ./cmd/podman-console --version)" = "podman-console 0.2.0"
       - run: go build ./cmd/podman-console
         env:
           GOOS: ${{ matrix.goos }}

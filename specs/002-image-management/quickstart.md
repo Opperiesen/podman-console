@@ -27,3 +27,23 @@ Use a disposable image reference on a dedicated host. The test must verify:
 
 The live test remains opt-in and must use the existing connection environment contract. It must not
 use a user’s important image, credentials, registry policy, or production host.
+
+## Validation record — 2026-08-26
+
+- `go test -tags=containers_image_openpgp,remote ./...` passes;
+- `go test -race -tags=containers_image_openpgp,remote ./...` passes;
+- `go vet -tags=containers_image_openpgp,remote ./...` passes;
+- Darwin/Linux/Windows amd64/arm64 cross-builds pass with the production build tags;
+- the opt-in integration package compiles and skips cleanly when no live URI or disposable image
+  reference is supplied;
+- the opt-in image workflow passes against the dedicated Rocky Linux 9.8/arm64 VM with rootless
+  Podman 5.8.2 using `quay.io/libpod/alpine:latest`; pull, authoritative list, inspect, removal,
+  and post-test cleanup all pass;
+- the existing live inventory and container workflow also pass against that VM, and the VM is
+  returned to its stopped state with no test container or image remaining;
+- fake-backed model, UI, and `httptest` adapter tests cover image listing, details, local filtering,
+  ordered pull progress, cancellation, malformed/registry errors, stale targets, exact removal,
+  and safe removal options;
+- the dependency graph and `go.sum` are unchanged and `go mod verify` passes;
+- version metadata is prepared as `0.2.0` on this feature branch; `main` and the published `v0.1.0`
+  release remain unchanged pending explicit promotion.
