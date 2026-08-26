@@ -7,16 +7,16 @@
 
 **Purpose**: Add the request/result vocabulary without leaking Podman bindings into the UI.
 
-- [ ] T001 [P] Add `ContainerCreateRequest`, `ContainerRunResult`, validation helpers, and create
+- [x] T001 [P] Add `ContainerCreateRequest`, `ContainerRunResult`, validation helpers, and create
   operation statuses in `internal/domain/container.go`.
-- [ ] T002 Extend `PodmanClient` with the one-container run operation in `internal/podman/client.go`.
-- [ ] T003 [P] Add create, name-conflict, image-not-found, and partial-start error classification in
+- [x] T002 Extend `PodmanClient` with the one-container run operation in `internal/podman/client.go`.
+- [x] T003 [P] Add create, name-conflict, image-not-found, and partial-start error classification in
   `internal/domain/operation.go` and `internal/podman/errors.go`.
-- [ ] T004 Implement `specgen.NewSpecGenerator`, `containers.CreateWithSpec`, and ordered
+- [x] T004 Implement `specgen.NewSpecGenerator`, `containers.CreateWithSpec`, and ordered
   `containers.Start` translation in `internal/podman/bindings.go`.
-- [ ] T005 [P] Extend the deterministic fake client with exact create/start calls, results, errors,
+- [x] T005 [P] Extend the deterministic fake client with exact create/start calls, results, errors,
   and cancellation behavior in `tests/fixtures/fake_client.go`.
-- [ ] T006 Add create/run messages and target-aware operation state in `internal/app/messages.go`
+- [x] T006 Add create/run messages and target-aware operation state in `internal/app/messages.go`
   and `internal/app/model.go`.
 
 **Checkpoint**: The client contract and fake can represent creation, start, cancellation, and
@@ -28,20 +28,20 @@ partial results without changing existing image or container workflows.
 
 ### Tests
 
-- [ ] T007 [P] [US1] Add domain tests for name grammar, blank command, argument tokenization, and
+- [x] T007 [P] [US1] Add domain tests for name grammar, blank command, argument tokenization, and
   shell-control rejection in `internal/domain/container_test.go`.
-- [ ] T008 [P] [US1] Add model tests for image identity capture, form editing, validation feedback,
+- [x] T008 [P] [US1] Add model tests for image identity capture, form editing, validation feedback,
   and no-request cancellation in `internal/app/container_create_test.go`.
-- [ ] T009 [P] [US1] Add form rendering tests for read-only image identity, long values, narrow
+- [x] T009 [P] [US1] Add form rendering tests for read-only image identity, long values, narrow
   terminals, and validation errors in `internal/ui/container_create_test.go`.
 
 ### Implementation
 
-- [ ] T010 [US1] Add image-to-create navigation and non-conflicting key bindings in
+- [x] T010 [US1] Add image-to-create navigation and non-conflicting key bindings in
   `internal/ui/keys.go` and `internal/app/model.go`.
-- [ ] T011 [US1] Implement image generation capture, name/command form state, local validation, and
+- [x] T011 [US1] Implement image generation capture, name/command form state, local validation, and
   stale selection invalidation in `internal/app/model.go`.
-- [ ] T012 [US1] Render the create form, field hints, and disabled/empty-image states in
+- [x] T012 [US1] Render the create form, field hints, and disabled/empty-image states in
   `internal/ui/layout.go` and the appropriate UI component file.
 
 **Checkpoint**: An operator can prepare a valid request and cancel it without contacting Podman.
@@ -52,20 +52,20 @@ partial results without changing existing image or container workflows.
 
 ### Tests
 
-- [ ] T013 [P] [US2] Add model tests for exact confirmation content, ordered create/start, success
+- [x] T013 [P] [US2] Add model tests for exact confirmation content, ordered create/start, success
   feedback, and container/image refresh in `internal/app/container_create_test.go`.
-- [ ] T014 [P] [US2] Add `httptest` binding coverage for the create JSON payload, disabled
+- [x] T014 [P] [US2] Add `httptest` binding coverage for the create JSON payload, disabled
   interactive settings, returned ID, and start request order in `internal/podman/bindings_test.go`.
-- [ ] T015 [P] [US2] Add UI tests for confirmation, progress/status transitions, and successful
+- [x] T015 [P] [US2] Add UI tests for confirmation, progress/status transitions, and successful
   result rendering in `internal/ui/container_create_test.go`.
 
 ### Implementation
 
-- [ ] T016 [US2] Implement confirmation capture and asynchronous create/start command delivery in
+- [x] T016 [US2] Implement confirmation capture and asynchronous create/start command delivery in
   `internal/app/messages.go` and `internal/app/model.go`.
-- [ ] T017 [US2] Refresh container and image inventories from the host after a successful run and
+- [x] T017 [US2] Refresh container and image inventories from the host after a successful run and
   select the returned container without synthesizing details in `internal/app/model.go`.
-- [ ] T018 [US2] Render exact target confirmation, creating/starting status, and success feedback in
+- [x] T018 [US2] Render exact target confirmation, creating/starting status, and success feedback in
   `internal/ui/layout.go` and the appropriate UI component file.
 
 **Checkpoint**: A confirmed local image can become a visible detached container through one
@@ -77,20 +77,20 @@ non-blocking workflow.
 
 ### Tests
 
-- [ ] T019 [P] [US3] Add tests for stale connection/image generation, duplicate submit prevention,
+- [x] T019 [P] [US3] Add tests for stale connection/image generation, duplicate submit prevention,
   and cancellation before/after create in `internal/app/container_create_test.go`.
-- [ ] T020 [P] [US3] Add tests for image-not-found, name-conflict, authorization, transport, and
+- [x] T020 [P] [US3] Add tests for image-not-found, name-conflict, authorization, transport, and
   start-after-create failures in `internal/podman/errors_test.go` and app tests.
-- [ ] T021 [P] [US3] Add partial-result and exact-ID feedback rendering tests in
+- [x] T021 [P] [US3] Add partial-result and exact-ID feedback rendering tests in
   `internal/ui/container_create_test.go`.
 
 ### Implementation
 
-- [ ] T022 [US3] Preserve the created ID on start failure/cancellation and prevent automatic remove
+- [x] T022 [US3] Preserve the created ID on start failure/cancellation and prevent automatic remove
   or retry in `internal/podman/bindings.go` and `internal/app/model.go`.
-- [ ] T023 [US3] Add target-aware confirmation invalidation, duplicate-submit guards, and typed
+- [x] T023 [US3] Add target-aware confirmation invalidation, duplicate-submit guards, and typed
   feedback mappings in `internal/app/model.go`.
-- [ ] T024 [US3] Document the local-image requirement, argument-only command semantics, detached
+- [x] T024 [US3] Document the local-image requirement, argument-only command semantics, detached
   behavior, and partial outcomes in `docs/containers.md` and `docs/keybindings.md`.
 
 **Checkpoint**: Cancellation or stale state cannot create an unintended container, and a partial
@@ -100,7 +100,7 @@ operation never claims success or silently cleans up the target.
 
 - [ ] T025 [P] Add opt-in Rocky Linux container-creation coverage with exact cleanup in
   `tests/integration/container_create_test.go`.
-- [ ] T026 [P] Update the README feature overview, quickstart links, and keyboard workflow for
+- [x] T026 [P] Update the README feature overview, quickstart links, and keyboard workflow for
   creating containers from local images.
 - [ ] T027 Run formatting, default tests, race tests, vet, six-target builds, and the opt-in live
   acceptance workflow; record results in `specs/003-container-creation/quickstart.md`.

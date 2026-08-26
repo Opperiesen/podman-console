@@ -19,10 +19,11 @@ Use a dedicated Podman host and a disposable image that is safe to run without c
 
 ```sh
 PODMAN_CONSOLE_URI='ssh://user@example.test/run/user/1000/podman/podman.sock' \
-PODMAN_CONSOLE_TEST_IMAGE='quay.io/libpod/alpine:latest' \
-PODMAN_CONSOLE_TEST_CONTAINER='podman-console-create-live-test' \
+PODMAN_CONSOLE_TEST_CREATE_IMAGE='quay.io/libpod/alpine:latest' \
+PODMAN_CONSOLE_TEST_CREATE_NAME='podman-console-create-live-test' \
+PODMAN_CONSOLE_TEST_CREATE_COMMAND='sleep 30' \
 go test -tags=containers_image_openpgp,remote,integration \
-  -run TestLiveContainerCreationWorkflow -v ./tests/integration
+  -run TestLiveContainerCreateWorkflow -v ./tests/integration
 ```
 
 The opt-in test must:

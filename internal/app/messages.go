@@ -42,6 +42,14 @@ type ContainerRunFinishedMsg struct {
 	Err        error
 }
 
+type ContainerCreateRefreshMsg struct {
+	Generation   uint64
+	Containers   []domain.ContainerSummary
+	Images       []domain.ImageSummary
+	ContainerErr error
+	ImageErr     error
+}
+
 type ImageInventoryLoadedMsg struct {
 	Generation uint64
 	Images     []domain.ImageSummary
@@ -138,6 +146,23 @@ func runContainerCmd(ctx context.Context, client podman.Client, request domain.C
 		}
 		result, err := client.RunContainer(ctx, request)
 		return ContainerRunFinishedMsg{Generation: generation, Target: target, Request: request, Result: result, Err: err}
+	}
+}
+
+func refreshAfterContainerCreateCmd(ctx context.Context, client podman.Client, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return ContainerCreateRefreshMsg{Generation: generation, ContainerErr: context.Canceled, ImageErr: context.Canceled}
+		}
+		containers, containerErr := client.ListContainers(ctx)
+		images, imageErr := client.ListImages(ctx)
+		return ContainerCreateRefreshMsg{
+			Generation:   generation,
+			Containers:   containers,
+			Images:       images,
+			ContainerErr: containerErr,
+			ImageErr:     imageErr,
+		}
 	}
 }
 

@@ -138,16 +138,11 @@ func (c *Client) RunContainer(ctx context.Context, request domain.ContainerCreat
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Calls = append(c.Calls, string(domain.ActionStart)+":"+result.ContainerID)
-	if startErr != nil {
-		result.Started = false
-		return result, startErr
-	}
-	result.Started = true
 	image := request.ImageReference
 	if image == "" {
 		image = request.ImageID
 	}
-	container := domain.ContainerSummary{ID: result.ContainerID, Name: request.Name, Image: image, State: domain.StateRunning}
+	container := domain.ContainerSummary{ID: result.ContainerID, Name: request.Name, Image: image, State: domain.StateCreated}
 	found := false
 	for _, existing := range c.Containers {
 		if existing.ID == container.ID {
@@ -163,6 +158,17 @@ func (c *Client) RunContainer(ctx context.Context, request domain.ContainerCreat
 	}
 	if _, ok := c.Details[container.ID]; !ok {
 		c.Details[container.ID] = domain.ContainerDetails{ContainerSummary: container, Command: append([]string(nil), request.Command...)}
+	}
+	if startErr != nil {
+		result.Started = false
+		return result, startErr
+	}
+	result.Started = true
+	for i := range c.Containers {
+		if c.Containers[i].ID == container.ID {
+			c.Containers[i].State = domain.StateRunning
+			break
+		}
 	}
 	return result, nil
 }
