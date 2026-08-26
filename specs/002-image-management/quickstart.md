@@ -45,5 +45,5 @@ use a user’s important image, credentials, registry policy, or production host
   ordered pull progress, cancellation, malformed/registry errors, stale targets, exact removal,
   and safe removal options;
 - the dependency graph and `go.sum` are unchanged and `go mod verify` passes;
-- version metadata is prepared as `0.2.0` on this feature branch; `main` and the published `v0.1.0`
-  release remain unchanged pending explicit promotion.
+- version metadata was promoted to `0.2.0` on `main` and published as `v0.2.0` after these gates
+  passed; the next feature branch owns the `0.3.0` promotion.

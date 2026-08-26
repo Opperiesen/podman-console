@@ -104,7 +104,7 @@ operation never claims success or silently cleans up the target.
   creating containers from local images.
 - [x] T027 Run formatting, default tests, race tests, vet, six-target builds, and the opt-in live
   acceptance workflow; record results in `specs/003-container-creation/quickstart.md`.
-- [ ] T028 Review dependency/license impact and prepare version metadata for `0.3.0` only after all
+- [x] T028 Review dependency/license impact and prepare version metadata for `0.3.0` only after all
   stories and validation gates pass.
 
 ## Dependencies and Execution Order
