@@ -36,3 +36,12 @@ The opt-in test must:
 6. verify the container is absent at the end and leave any pre-existing image untouched.
 
 The test must skip when its environment is missing and must never target a production host.
+
+## Validation record
+
+Validated on 2026-08-26 from the Mac development host:
+
+- default tests, race detector, `go vet`, and tagged build: passed;
+- six cross-builds (`darwin`, `linux`, `windows` × `amd64`, `arm64`): passed;
+- Rocky Linux 9.8 ARM64 / Podman 5.8.2 rootless acceptance: passed in 10.26 s;
+- disposable container and test image: removed; Rocky VM returned to `Stopped`.

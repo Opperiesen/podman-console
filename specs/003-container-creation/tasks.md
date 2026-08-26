@@ -98,11 +98,11 @@ operation never claims success or silently cleans up the target.
 
 ## Phase 5: Documentation and live validation
 
-- [ ] T025 [P] Add opt-in Rocky Linux container-creation coverage with exact cleanup in
+- [x] T025 [P] Add opt-in Rocky Linux container-creation coverage with exact cleanup in
   `tests/integration/container_create_test.go`.
 - [x] T026 [P] Update the README feature overview, quickstart links, and keyboard workflow for
   creating containers from local images.
-- [ ] T027 Run formatting, default tests, race tests, vet, six-target builds, and the opt-in live
+- [x] T027 Run formatting, default tests, race tests, vet, six-target builds, and the opt-in live
   acceptance workflow; record results in `specs/003-container-creation/quickstart.md`.
 - [ ] T028 Review dependency/license impact and prepare version metadata for `0.3.0` only after all
   stories and validation gates pass.
